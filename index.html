@@ -902,6 +902,11 @@ textarea:focus-visible,
         return list;
       }, []);
     },
+    update: function (id, changes) {
+      return StorageService.update("patients", function (list) {
+        return (list || []).map(function (p) { return p.id === id ? Object.assign({}, p, changes) : p; });
+      }, []);
+    },
     nextId: function () {
       const list = PatientService.list();
       const n = list.length + 1;
@@ -944,6 +949,52 @@ textarea:focus-visible,
     ]);
   }
 
+  /* ============================================================
+     MEDICATION SERVICE — PharmaSync
+     ============================================================ */
+  const MED_STATUSES = ["Disponible", "Stock limitado", "Riesgo", "Agotado"];
+  const MED_FACILITIES = ["Policlínica Central (demo)", "Centro de Salud Norte (demo)", "Clínica Comunitaria Este (demo)"];
+
+  const SYNTHETIC_MEDICATIONS = [
+    { id: "MED-ITEM-01", name: "Losartán 50 mg", presentation: "Tableta", facility: MED_FACILITIES[0], stock: 420, status: "Disponible" },
+    { id: "MED-ITEM-02", name: "Losartán 50 mg", presentation: "Tableta", facility: MED_FACILITIES[1], stock: 38, status: "Stock limitado" },
+    { id: "MED-ITEM-03", name: "Losartán 50 mg", presentation: "Tableta", facility: MED_FACILITIES[2], stock: 0, status: "Agotado" },
+    { id: "MED-ITEM-04", name: "Metformina 850 mg", presentation: "Tableta", facility: MED_FACILITIES[0], stock: 12, status: "Riesgo" },
+    { id: "MED-ITEM-05", name: "Metformina 850 mg", presentation: "Tableta", facility: MED_FACILITIES[1], stock: 260, status: "Disponible" },
+    { id: "MED-ITEM-06", name: "Metformina 850 mg", presentation: "Tableta", facility: MED_FACILITIES[2], stock: 150, status: "Disponible" },
+    { id: "MED-ITEM-07", name: "Salbutamol inhalador", presentation: "Inhalador 100 mcg", facility: MED_FACILITIES[0], stock: 55, status: "Disponible" },
+    { id: "MED-ITEM-08", name: "Salbutamol inhalador", presentation: "Inhalador 100 mcg", facility: MED_FACILITIES[1], stock: 0, status: "Agotado" },
+    { id: "MED-ITEM-09", name: "Amoxicilina 500 mg", presentation: "Cápsula", facility: MED_FACILITIES[2], stock: 300, status: "Disponible" }
+  ];
+
+  /* Base de alternativas explícitamente ficticia para el copiloto
+     farmacológico. No representa equivalencia terapéutica real. */
+  const SYNTHETIC_ALTERNATIVES = {
+    "Losartán 50 mg": ["Enalapril 10 mg (alternativa ficticia)", "Valsartán 80 mg (alternativa ficticia)"],
+    "Metformina 850 mg": ["Metformina 500 mg (alternativa ficticia)", "Glibenclamida 5 mg (alternativa ficticia)"],
+    "Salbutamol inhalador": ["Ipratropio inhalador (alternativa ficticia)"],
+    "Amoxicilina 500 mg": ["Amoxicilina/Ácido clavulánico (alternativa ficticia)"]
+  };
+
+  function seedMedicationData() {
+    StorageService.seed("medications", SYNTHETIC_MEDICATIONS);
+  }
+
+  const MedicationService = {
+    list: function () { return StorageService.get("medications", []); },
+    uniqueNames: function () {
+      const seen = {};
+      return MedicationService.list().filter(function (m) {
+        if (seen[m.name]) return false;
+        seen[m.name] = true;
+        return true;
+      });
+    },
+    byName: function (name) {
+      return MedicationService.list().filter(function (m) { return m.name === name; });
+    }
+  };
+
   const AppointmentService = {
     list: function () { return StorageService.get("appointments", []); },
     doctors: function () { return StorageService.get("doctors", []); },
@@ -968,11 +1019,88 @@ textarea:focus-visible,
         return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, { fecha: fecha, hora: hora, estado: "Confirmada" }) : a; });
       }, []);
     },
+    update: function (id, changes) {
+      return StorageService.update("appointments", function (list) {
+        return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, changes) : a; });
+      }, []);
+    },
     upcomingCount: function () {
       const today = new Date().toISOString().slice(0, 10);
       return AppointmentService.list().filter(function (a) {
         return a.fecha >= today && a.estado !== "Cancelada" && a.estado !== "Completada" && a.estado !== "No asistió";
       }).length;
+    }
+  };
+
+  /* ============================================================
+     PRECONSULTA SERVICE — Preconsulta Inteligente
+     ============================================================ */
+  const PreconsultaService = {
+    list: function () { return StorageService.get("preconsultas", []); },
+    listByPatient: function (patientId) {
+      return PreconsultaService.list().filter(function (p) { return p.patientId === patientId; });
+    },
+    nextId: function () { return "PRE-" + String(PreconsultaService.list().length + 1).padStart(4, "0"); },
+    create: function (entry) {
+      return StorageService.update("preconsultas", function (list) {
+        list = list || [];
+        list.push(entry);
+        return list;
+      }, []);
+    },
+    pendingCount: function () {
+      return PreconsultaService.list().filter(function (p) { return p.estado === "Pendiente"; }).length;
+    }
+  };
+
+  /* Resumen generado localmente por el asistente de demostración.
+     No es un diagnóstico: solo organiza la información declarada
+     por el paciente para apoyar al profesional. */
+  function generarResumenPreliminar(draft) {
+    return (
+      "Motivo de consulta declarado: " + (draft.motivo || "sin especificar") + ". " +
+      "Síntomas reportados: " + (draft.sintomas || "sin especificar") + ", con una duración aproximada de " + (draft.duracion || "sin especificar") +
+      " e intensidad autopercibida de " + (draft.intensidad || "sin especificar") + " sobre 10. " +
+      "Antecedentes declarados: " + (draft.antecedentes || "ninguno registrado") + ". " +
+      "Medicamentos actuales: " + (draft.medicamentos || "ninguno registrado") + ". " +
+      "Alergias declaradas: " + (draft.alergias || "ninguna registrada") + "."
+    );
+  }
+
+  /* ============================================================
+     CONSULTA SERVICE — Atención médica
+     ============================================================ */
+  const CONSULTATION_FACILITIES = ["Policlínica Central (demo)", "Centro de Salud Norte (demo)", "Clínica Comunitaria Este (demo)"];
+
+  const ConsultaService = {
+    list: function () { return StorageService.get("consultations", []); },
+    nextId: function () { return "CONS-" + String(ConsultaService.list().length + 1).padStart(4, "0"); },
+    get: function (id) { return ConsultaService.list().filter(function (c) { return c.id === id; })[0] || null; },
+    createFromAppointment: function (appt) {
+      const entry = {
+        id: ConsultaService.nextId(), appointmentId: appt.id, patientId: appt.patientId, patientName: appt.patientName,
+        doctorName: appt.doctorName, especialidad: appt.especialidad, modalidad: appt.modalidad,
+        instalacion: CONSULTATION_FACILITIES[0], fecha: appt.fecha, hora: appt.hora,
+        estado: "En curso", notas: []
+      };
+      StorageService.update("consultations", function (list) { list = list || []; list.push(entry); return list; }, []);
+      AppointmentService.updateStatus(appt.id, "En consulta");
+      return entry;
+    },
+    addNote: function (id, nota) {
+      return StorageService.update("consultations", function (list) {
+        return (list || []).map(function (c) {
+          if (c.id !== id) return c;
+          const notas = c.notas.slice();
+          notas.push({ texto: nota, fecha: new Date().toISOString().slice(0, 10) });
+          return Object.assign({}, c, { notas: notas });
+        });
+      }, []);
+    },
+    complete: function (id) {
+      return StorageService.update("consultations", function (list) {
+        return (list || []).map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "Completada" }) : c; });
+      }, []);
     }
   };
 
@@ -1215,7 +1343,7 @@ textarea:focus-visible,
       '<div class="metric-grid">' +
         UI.metricCard("Pacientes pendientes", null, Icons.patients) +
         UI.metricCard("Próximas citas", AppointmentService.upcomingCount() || null, Icons.agenda) +
-        UI.metricCard("Preconsultas pendientes", null, Icons.precheck) +
+        UI.metricCard("Preconsultas pendientes", PreconsultaService.pendingCount() || null, Icons.precheck) +
         UI.metricCard("Seguimientos activos", null, Icons.followup) +
       '</div>' +
       UI.sectionBlock(
@@ -1363,11 +1491,11 @@ textarea:focus-visible,
     const timeline = TimelineService.listByPatient(id);
 
     const acciones = [
-      { label: "Nueva preconsulta", handler: function () { pendingActionToast("La preconsulta"); } },
+      { label: "Nueva preconsulta", handler: function () { startPreconsultaForPatient(p.id); } },
       { label: "Agendar cita", handler: function () { openNewAppointmentModal(p.id); } },
-      { label: "Iniciar videoconsulta", handler: function () { pendingActionToast("La videoconsulta de demostración"); } },
+      { label: "Iniciar videoconsulta", handler: function () { navigateTo("consultas"); } },
       { label: "Ver documentos", handler: function () { pendingActionToast("El panel de documentos"); } },
-      { label: "Ver medicamentos", handler: function () { pendingActionToast("PharmaSync"); } },
+      { label: "Ver medicamentos", handler: function () { navigateTo("medicamentos"); } },
       { label: "Agregar seguimiento", handler: function () { openAddFollowUpModal(p.id); } }
     ];
 
@@ -1379,7 +1507,10 @@ textarea:focus-visible,
           '<h1>' + p.nombre + '</h1>' +
           '<div class="view-header__desc">' + p.identificacion + ' · ' + p.edad + ' años</div>' +
         '</div>' +
-        '<span class="badge ' + statusBadgeClass(p.estado) + '">' + p.estado + '</span>' +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+          '<span class="badge ' + statusBadgeClass(p.estado) + '">' + p.estado + '</span>' +
+          '<button class="btn btn-secondary btn-sm" id="edit-patient-btn">Editar paciente</button>' +
+        '</div>' +
       '</div>' +
 
       '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;" class="p360-grid">' +
@@ -1438,10 +1569,66 @@ textarea:focus-visible,
       AppState.selectedPatient = null;
       navigateTo("pacientes");
     });
+    document.getElementById("edit-patient-btn").addEventListener("click", function () { openEditPatientModal(p.id); });
     Array.prototype.forEach.call(root.querySelectorAll("[data-action]"), function (btn) {
       btn.addEventListener("click", function () {
         acciones[parseInt(btn.getAttribute("data-action"), 10)].handler();
       });
+    });
+  }
+
+  function openEditPatientModal(id) {
+    const p = PatientService.get(id);
+    if (!p) return;
+    Modal.open({
+      title: "Editar paciente",
+      body:
+        '<div class="form-field"><label>Nombre completo</label><input type="text" id="ep-nombre" value="' + p.nombre + '"></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+          '<div class="form-field"><label>Edad</label><input type="number" id="ep-edad" min="0" max="120" value="' + p.edad + '"></div>' +
+          '<div class="form-field"><label>Estado</label><select id="ep-estado">' +
+            PATIENT_STATUSES.map(function (s) { return '<option value="' + s + '"' + (p.estado === s ? ' selected' : '') + '>' + s + '</option>'; }).join("") +
+          '</select></div>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+          '<div class="form-field"><label>Teléfono</label><input type="text" id="ep-telefono" value="' + p.telefono + '"></div>' +
+          '<div class="form-field"><label>Correo</label><input type="text" id="ep-correo" value="' + p.correo + '"></div>' +
+        '</div>' +
+        '<div class="form-field"><label>Alergias (separadas por coma)</label><input type="text" id="ep-alergias" value="' + p.alergias.join(", ") + '"></div>' +
+        '<div class="form-field"><label>Medicamentos registrados (separados por coma)</label><input type="text" id="ep-medicamentos" value="' + p.medicamentos.join(", ") + '"></div>' +
+        '<div class="form-field"><label>Antecedentes (separados por coma)</label><input type="text" id="ep-antecedentes" value="' + p.antecedentes.join(", ") + '"></div>' +
+        '<div class="form-field"><label>Condiciones registradas (separadas por coma)</label><input type="text" id="ep-condiciones" value="' + p.condiciones.join(", ") + '"></div>' +
+        '<div class="form-field__hint">Todos los campos permanecen como datos sintéticos del entorno de demostración.</div>',
+      foot:
+        '<button class="btn btn-secondary" id="ep-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="ep-save">Guardar cambios</button>'
+    });
+    document.getElementById("ep-cancel").addEventListener("click", Modal.close);
+    document.getElementById("ep-save").addEventListener("click", function () {
+      const nombre = document.getElementById("ep-nombre").value.trim();
+      const edad = parseInt(document.getElementById("ep-edad").value, 10);
+      if (!nombre || !edad) { Toast.show("Nombre y edad son obligatorios.", "danger"); return; }
+      const toList = function (val) { return val.split(",").map(function (s) { return s.trim(); }).filter(Boolean); };
+      const changes = {
+        nombre: nombre, edad: edad,
+        estado: document.getElementById("ep-estado").value,
+        telefono: document.getElementById("ep-telefono").value.trim(),
+        correo: document.getElementById("ep-correo").value.trim(),
+        alergias: toList(document.getElementById("ep-alergias").value) || ["Sin registrar"],
+        medicamentos: toList(document.getElementById("ep-medicamentos").value) || ["Sin registrar"],
+        antecedentes: toList(document.getElementById("ep-antecedentes").value) || ["Sin registrar"],
+        condiciones: toList(document.getElementById("ep-condiciones").value) || ["Sin registrar"]
+      };
+      PatientService.update(id, changes);
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: id, type: "edicion",
+        title: "Datos del paciente actualizados", description: "Edición de ficha desde Patient 360° (demo).",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Modal.close();
+      Toast.show("Datos del paciente actualizados.", "success");
+      renderPatient360(id);
     });
   }
 
@@ -1511,7 +1698,8 @@ textarea:focus-visible,
               '<td><span class="badge ' + apptBadgeClass(a.estado) + '">' + a.estado + '</span></td>' +
               '<td style="text-align:right;white-space:nowrap;">' +
                 (a.estado !== "Cancelada" && a.estado !== "Completada"
-                  ? '<button class="btn btn-ghost btn-sm" data-reschedule="' + a.id + '">Reprogramar</button>' +
+                  ? '<button class="btn btn-ghost btn-sm" data-edit="' + a.id + '">Editar</button>' +
+                    '<button class="btn btn-ghost btn-sm" data-reschedule="' + a.id + '">Reprogramar</button>' +
                     '<button class="btn btn-ghost btn-sm" data-cancel="' + a.id + '" style="color:var(--color-danger);">Cancelar</button>'
                   : '<span style="color:var(--color-text-faint);font-size:12px;">Sin acciones</span>') +
               '</td>' +
@@ -1540,6 +1728,9 @@ textarea:focus-visible,
     });
     Array.prototype.forEach.call(root.querySelectorAll("[data-reschedule]"), function (btn) {
       btn.addEventListener("click", function () { openRescheduleModal(btn.getAttribute("data-reschedule"), filterEstado); });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-edit]"), function (btn) {
+      btn.addEventListener("click", function () { openEditAppointmentModal(btn.getAttribute("data-edit"), filterEstado); });
     });
   }
 
@@ -1648,6 +1839,446 @@ textarea:focus-visible,
     });
   }
 
+  /* ============================================================
+     VISTA: PRECONSULTA INTELIGENTE
+     ============================================================ */
+  const PRECHECK_STEPS = ["Paciente", "Motivo", "Síntomas", "Duración", "Intensidad", "Antecedentes", "Medicamentos", "Alergias", "Archivos", "Resumen"];
+  let precheckDraft = null;
+  let precheckStep = 0;
+
+  function resetPrecheckDraft(presetPatientId) {
+    precheckDraft = {
+      patientId: presetPatientId || "", motivo: "", sintomas: "", duracion: "", intensidad: "5",
+      antecedentes: "", medicamentos: "", alergias: "", archivos: ""
+    };
+    precheckStep = 0;
+  }
+
+  function renderPreconsulta(presetPatientId) {
+    if (!precheckDraft) resetPrecheckDraft(presetPatientId);
+    const root = document.getElementById("view-root");
+    const patients = PatientService.list();
+
+    if (patients.length === 0) {
+      root.innerHTML = viewHeader("preconsulta") + UI.sectionBlock("Preconsulta", "",
+        UI.emptyState("No hay pacientes registrados", "Registra al menos un paciente en el módulo Pacientes antes de iniciar una preconsulta."));
+      return;
+    }
+
+    const progress = '<div style="display:flex;gap:5px;margin-bottom:20px;">' +
+      PRECHECK_STEPS.map(function (s, i) {
+        const state = i < precheckStep ? "background:var(--color-primary);" : i === precheckStep ? "background:var(--color-primary-soft);" : "background:var(--color-border);";
+        return '<div style="flex:1;height:4px;border-radius:2px;' + state + '"></div>';
+      }).join("") + '</div>' +
+      '<div class="mono" style="font-size:11px;color:var(--color-text-muted);margin-bottom:16px;">Paso ' + (precheckStep + 1) + ' de ' + PRECHECK_STEPS.length + ' · ' + PRECHECK_STEPS[precheckStep] + '</div>';
+
+    let stepBody = "";
+    if (precheckStep === 0) {
+      stepBody =
+        '<div class="form-field"><label>Selecciona el paciente</label><select id="pc-field">' +
+          patients.map(function (p) { return '<option value="' + p.id + '"' + (precheckDraft.patientId === p.id ? ' selected' : '') + '>' + p.nombre + '</option>'; }).join("") +
+        '</select></div>';
+    } else if (precheckStep === 1) {
+      stepBody = '<div class="form-field"><label>Motivo de consulta</label><input type="text" id="pc-field" placeholder="Ej. Dolor de cabeza persistente" value="' + precheckDraft.motivo + '"></div>';
+    } else if (precheckStep === 2) {
+      stepBody = '<div class="form-field"><label>Síntomas</label><textarea id="pc-field" rows="3" placeholder="Describe los síntomas (demo)">' + precheckDraft.sintomas + '</textarea></div>';
+    } else if (precheckStep === 3) {
+      stepBody = '<div class="form-field"><label>Duración</label><input type="text" id="pc-field" placeholder="Ej. 3 días" value="' + precheckDraft.duracion + '"></div>';
+    } else if (precheckStep === 4) {
+      stepBody = '<div class="form-field"><label>Intensidad autopercibida (1 a 10)</label><input type="number" id="pc-field" min="1" max="10" value="' + precheckDraft.intensidad + '"></div>';
+    } else if (precheckStep === 5) {
+      stepBody = '<div class="form-field"><label>Antecedentes</label><textarea id="pc-field" rows="2" placeholder="Antecedentes relevantes (demo)">' + precheckDraft.antecedentes + '</textarea></div>';
+    } else if (precheckStep === 6) {
+      stepBody = '<div class="form-field"><label>Medicamentos actuales</label><textarea id="pc-field" rows="2" placeholder="Medicamentos que toma actualmente (demo)">' + precheckDraft.medicamentos + '</textarea></div>';
+    } else if (precheckStep === 7) {
+      stepBody = '<div class="form-field"><label>Alergias</label><textarea id="pc-field" rows="2" placeholder="Alergias declaradas (demo)">' + precheckDraft.alergias + '</textarea></div>';
+    } else if (precheckStep === 8) {
+      stepBody =
+        '<div class="form-field"><label>Archivos o imágenes (opcional)</label><input type="text" id="pc-field" placeholder="Ej. foto_sintoma.jpg (simulado)" value="' + precheckDraft.archivos + '"></div>' +
+        '<div class="form-field__hint">En este entorno de demostración no se procesan archivos reales; solo se registra el nombre indicado como referencia.</div>';
+    } else if (precheckStep === 9) {
+      const resumen = generarResumenPreliminar(precheckDraft);
+      stepBody =
+        '<div class="card" style="background:var(--color-surface-muted);border-style:dashed;margin-bottom:16px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+            '<span class="badge badge-accent">Asistente IA de demostración</span>' +
+          '</div>' +
+          '<p style="font-size:13px;line-height:1.6;">' + resumen + '</p>' +
+        '</div>' +
+        '<div class="card" style="border-color:var(--color-warning);background:#FFFBEB;">' +
+          '<p style="font-size:12.5px;line-height:1.6;color:#92400E;">' +
+            'La información proporcionada puede ser compatible con diferentes causas. Durante la consulta, el profesional podría evaluar los síntomas descritos y determinar si necesita pruebas, tratamiento o seguimiento. Esta orientación no constituye un diagnóstico médico.' +
+          '</p>' +
+        '</div>';
+    }
+
+    root.innerHTML =
+      viewHeader("preconsulta") +
+      progress +
+      UI.sectionBlock(PRECHECK_STEPS[precheckStep], '', '<div style="padding:16px 20px;">' + stepBody + '</div>') +
+      '<div style="display:flex;justify-content:space-between;margin-top:16px;">' +
+        (precheckStep > 0 ? '<button class="btn btn-secondary" id="pc-back">← Atrás</button>' : '<span></span>') +
+        (precheckStep < PRECHECK_STEPS.length - 1
+          ? '<button class="btn btn-primary" id="pc-next">Continuar →</button>'
+          : '<button class="btn btn-primary" id="pc-finish">Enviar a consulta médica</button>') +
+      '</div>';
+
+    const field = document.getElementById("pc-field");
+    if (document.getElementById("pc-back")) {
+      document.getElementById("pc-back").addEventListener("click", function () {
+        savePrecheckField(field);
+        precheckStep -= 1;
+        renderPreconsulta();
+      });
+    }
+    if (document.getElementById("pc-next")) {
+      document.getElementById("pc-next").addEventListener("click", function () {
+        if (field && !field.value.trim() && precheckStep !== 4 && precheckStep !== 8) {
+          Toast.show("Completa este campo para continuar.", "danger");
+          return;
+        }
+        savePrecheckField(field);
+        precheckStep += 1;
+        renderPreconsulta();
+      });
+    }
+    if (document.getElementById("pc-finish")) {
+      document.getElementById("pc-finish").addEventListener("click", finishPreconsulta);
+    }
+  }
+
+  function savePrecheckField(field) {
+    if (!field) return;
+    const keys = ["patientId", "motivo", "sintomas", "duracion", "intensidad", "antecedentes", "medicamentos", "alergias", "archivos"];
+    precheckDraft[keys[precheckStep]] = field.value.trim();
+  }
+
+  function finishPreconsulta() {
+    const patient = PatientService.get(precheckDraft.patientId);
+    const resumen = generarResumenPreliminar(precheckDraft);
+    const entry = Object.assign({}, precheckDraft, {
+      id: PreconsultaService.nextId(), estado: "Pendiente", resumen: resumen,
+      fecha: new Date().toISOString().slice(0, 10)
+    });
+    PreconsultaService.create(entry);
+    TimelineService.add({
+      id: "TL-" + Date.now(), patientId: precheckDraft.patientId, type: "preconsulta",
+      title: "Preconsulta registrada", description: "Motivo: " + (precheckDraft.motivo || "sin especificar") + " (demo).",
+      date: new Date().toISOString().slice(0, 10),
+      actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+    });
+    Toast.show("Preconsulta enviada. Queda registrada en el historial de " + (patient ? patient.nombre : "el paciente") + ".", "success");
+    resetPrecheckDraft(null);
+    if (patient) navigateToPatient(patient.id);
+    else navigateTo("dashboard");
+  }
+
+  function startPreconsultaForPatient(patientId) {
+    resetPrecheckDraft(patientId);
+    AppState.currentView = "preconsulta";
+    AppState.selectedPatient = null;
+    window.location.hash = "preconsulta";
+    renderSidebarNav();
+    renderPreconsulta();
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  /* ============================================================
+     VISTA: CONSULTAS
+     ============================================================ */
+  function renderConsultas() {
+    const root = document.getElementById("view-root");
+    const readyAppts = AppointmentService.list().filter(function (a) {
+      return (a.estado === "Confirmada" || a.estado === "Programada") &&
+             !ConsultaService.list().some(function (c) { return c.appointmentId === a.id && c.estado === "En curso"; });
+    });
+    const consultas = ConsultaService.list().sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+
+    const readyRows = readyAppts.length === 0
+      ? '<tr><td colspan="4" style="padding:0;">' + UI.emptyState("Sin citas listas para consulta", "Las citas confirmadas o programadas desde Agenda aparecerán aquí para iniciar la consulta.") + '</td></tr>'
+      : readyAppts.map(function (a) {
+          return (
+            '<tr><td><div style="font-weight:600;">' + a.patientName + '</div><div style="font-size:11.5px;color:var(--color-text-muted);">' + a.especialidad + '</div></td>' +
+            '<td>' + a.doctorName + '</td>' +
+            '<td class="mono">' + a.fecha + ' · ' + a.hora + '</td>' +
+            '<td style="text-align:right;"><button class="btn btn-primary btn-sm" data-start="' + a.id + '">Iniciar consulta</button></td></tr>'
+          );
+        }).join("");
+
+    const histRows = consultas.length === 0
+      ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState("Sin consultas registradas", "El historial de consultas iniciadas aparecerá aquí.") + '</td></tr>'
+      : consultas.map(function (c) {
+          return (
+            '<tr style="cursor:pointer;" data-open="' + c.id + '">' +
+              '<td><div style="font-weight:600;">' + c.patientName + '</div><div style="font-size:11.5px;color:var(--color-text-muted);">' + c.especialidad + '</div></td>' +
+              '<td>' + c.doctorName + '</td>' +
+              '<td><span class="badge badge-neutral">' + c.modalidad + '</span></td>' +
+              '<td class="mono">' + c.fecha + ' · ' + c.hora + '</td>' +
+              '<td><span class="badge ' + (c.estado === "Completada" ? "badge-success" : "badge-accent") + '">' + c.estado + '</span></td>' +
+            '</tr>'
+          );
+        }).join("");
+
+    root.innerHTML =
+      viewHeader("consultas") +
+      UI.sectionBlock("Citas listas para consulta", '<span class="badge badge-neutral">' + readyAppts.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Fecha</th><th></th></tr></thead><tbody>' + readyRows + '</tbody></table>') +
+      UI.sectionBlock("Historial de consultas", '<span class="badge badge-neutral">' + consultas.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Modalidad</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>' + histRows + '</tbody></table>');
+
+    Array.prototype.forEach.call(root.querySelectorAll("[data-start]"), function (btn) {
+      btn.addEventListener("click", function () {
+        const appt = AppointmentService.list().filter(function (a) { return a.id === btn.getAttribute("data-start"); })[0];
+        const consulta = ConsultaService.createFromAppointment(appt);
+        TimelineService.add({
+          id: "TL-" + Date.now(), patientId: appt.patientId, type: "consulta",
+          title: "Consulta médica iniciada", description: appt.especialidad + " · " + appt.modalidad + " (demo).",
+          date: new Date().toISOString().slice(0, 10),
+          actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+        });
+        renderConsultaDetalle(consulta.id);
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-open]"), function (row) {
+      row.addEventListener("click", function () { renderConsultaDetalle(row.getAttribute("data-open")); });
+    });
+  }
+
+  function renderConsultaDetalle(id) {
+    const root = document.getElementById("view-root");
+    const c = ConsultaService.get(id);
+    if (!c) { renderConsultas(); return; }
+
+    const infoBlock = c.modalidad === "Presencial"
+      ? '<div style="padding:16px 20px;font-size:13px;line-height:1.9;">' +
+          '<div><strong>' + c.fecha + ' · ' + c.hora + '</strong></div>' +
+          '<div>' + c.instalacion + '</div>' +
+          '<div>' + c.doctorName + ' · ' + c.especialidad + '</div>' +
+        '</div>'
+      : '<div style="padding:16px 20px;font-size:13px;line-height:1.9;">' +
+          '<div><strong>' + c.fecha + ' · ' + c.hora + '</strong></div>' +
+          '<div>' + c.doctorName + ' · ' + c.especialidad + '</div>' +
+          '<button class="btn btn-secondary btn-sm" id="cd-video" style="margin-top:10px;">Iniciar videoconsulta</button>' +
+        '</div>';
+
+    root.innerHTML =
+      '<div class="view-header">' +
+        '<div>' +
+          '<button class="btn btn-ghost btn-sm" id="back-to-consultas" style="padding-left:0;margin-bottom:8px;">← Volver a consultas</button>' +
+          '<div class="view-header__eyebrow">Consulta médica</div>' +
+          '<h1>' + c.patientName + '</h1>' +
+        '</div>' +
+        '<span class="badge ' + (c.estado === "Completada" ? "badge-success" : "badge-accent") + '">' + c.estado + '</span>' +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;" class="p360-grid">' +
+        '<div>' +
+          UI.sectionBlock("Notas de consulta", '', '<div style="padding:16px 20px;">' +
+            (c.notas.length === 0 ? '<div style="color:var(--color-text-faint);font-size:12.5px;margin-bottom:12px;">Sin notas registradas.</div>' :
+              c.notas.map(function (n) { return '<div style="padding:8px 0;border-bottom:1px solid var(--color-border);font-size:13px;"><span class="mono" style="color:var(--color-text-muted);font-size:11px;">' + n.fecha + '</span><div>' + n.texto + '</div></div>'; }).join("")) +
+            (c.estado !== "Completada"
+              ? '<div class="form-field" style="margin-top:12px;"><label>Agregar nota</label><textarea id="cd-nota" rows="3" placeholder="Notas de la consulta (demo)"></textarea></div><button class="btn btn-secondary btn-sm" id="cd-save-note">Guardar nota</button>'
+              : '') +
+          '</div>') +
+        '</div>' +
+        '<div>' +
+          UI.sectionBlock("Detalle de la cita", '', infoBlock) +
+          (c.estado !== "Completada" ? UI.sectionBlock("Finalizar", '', '<div style="padding:16px 20px;"><button class="btn btn-primary" id="cd-complete" style="width:100%;">Marcar como completada</button></div>') : '') +
+        '</div>' +
+      '</div>';
+
+    document.getElementById("back-to-consultas").addEventListener("click", renderConsultas);
+    const noteBtn = document.getElementById("cd-save-note");
+    if (noteBtn) noteBtn.addEventListener("click", function () {
+      const val = document.getElementById("cd-nota").value.trim();
+      if (!val) { Toast.show("Escribe una nota antes de guardar.", "danger"); return; }
+      ConsultaService.addNote(id, val);
+      Toast.show("Nota guardada.", "success");
+      renderConsultaDetalle(id);
+    });
+    const videoBtn = document.getElementById("cd-video");
+    if (videoBtn) videoBtn.addEventListener("click", function () {
+      Modal.open({
+        title: "Videoconsulta",
+        body:
+          '<div style="text-align:center;padding:20px 8px;">' +
+            '<div style="width:56px;height:56px;border-radius:14px;background:var(--color-surface-muted);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:var(--color-text-muted);">' +
+              '<svg viewBox="0 0 24 24" width="26" height="26" fill="none"><rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="m16 10 5-3v10l-5-3" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>' +
+            '</div>' +
+            '<p style="font-size:13px;color:var(--color-text-muted);">Interfaz de videoconsulta de demostración.</p>' +
+            '<span class="badge badge-warning" style="margin-top:8px;">DEMO · SIN CONEXIÓN MÉDICA REAL</span>' +
+          '</div>',
+        foot: '<button class="btn btn-primary" id="video-close" style="width:100%;">Cerrar</button>'
+      });
+      document.getElementById("video-close").addEventListener("click", Modal.close);
+    });
+    const completeBtn = document.getElementById("cd-complete");
+    if (completeBtn) completeBtn.addEventListener("click", function () {
+      ConsultaService.complete(id);
+      AppointmentService.updateStatus(c.appointmentId, "Completada");
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: c.patientId, type: "consulta",
+        title: "Consulta completada", description: c.especialidad + " · " + c.modalidad + " (demo).",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Toast.show("Consulta marcada como completada.", "success");
+      renderConsultaDetalle(id);
+    });
+  }
+
+  function openEditAppointmentModal(id, filterEstado) {
+    const appt = AppointmentService.list().filter(function (a) { return a.id === id; })[0];
+    const doctors = AppointmentService.doctors();
+    if (!appt) return;
+    Modal.open({
+      title: "Editar cita",
+      body:
+        '<div class="form-field"><label>Médico</label><select id="ea-doctor">' +
+          doctors.map(function (d) { return '<option value="' + d.id + '" data-esp="' + d.especialidad + '"' + (d.id === appt.doctorId ? ' selected' : '') + '>' + d.nombre + ' — ' + d.especialidad + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Modalidad</label><select id="ea-modalidad">' +
+          '<option' + (appt.modalidad === "Presencial" ? " selected" : "") + '>Presencial</option>' +
+          '<option' + (appt.modalidad === "Virtual" ? " selected" : "") + '>Virtual</option>' +
+        '</select></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+          '<div class="form-field"><label>Fecha</label><input type="date" id="ea-fecha" value="' + appt.fecha + '"></div>' +
+          '<div class="form-field"><label>Hora</label><input type="time" id="ea-hora" value="' + appt.hora + '"></div>' +
+        '</div>',
+      foot:
+        '<button class="btn btn-secondary" id="ea-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="ea-save">Guardar cambios</button>'
+    });
+    document.getElementById("ea-cancel").addEventListener("click", Modal.close);
+    document.getElementById("ea-save").addEventListener("click", function () {
+      const doctorSelect = document.getElementById("ea-doctor");
+      const doctorId = doctorSelect.value;
+      const doctor = doctors.filter(function (d) { return d.id === doctorId; })[0];
+      const especialidad = doctorSelect.selectedOptions[0].getAttribute("data-esp");
+      const modalidad = document.getElementById("ea-modalidad").value;
+      const fecha = document.getElementById("ea-fecha").value;
+      const hora = document.getElementById("ea-hora").value;
+      if (!fecha || !hora) { Toast.show("Selecciona fecha y hora.", "danger"); return; }
+      AppointmentService.update(id, { doctorId: doctorId, doctorName: doctor.nombre, especialidad: especialidad, modalidad: modalidad, fecha: fecha, hora: hora });
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: appt.patientId, type: "cita",
+        title: "Cita editada", description: doctor.nombre + " · " + especialidad + " · " + modalidad + " · " + fecha + " " + hora + " (demo).",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Modal.close();
+      Toast.show("Cita actualizada.", "success");
+      renderAgenda(filterEstado);
+    });
+  }
+
+  /* ============================================================
+     VISTA: MEDICAMENTOS — PharmaSync
+     ============================================================ */
+  function medStatusBadge(estado) {
+    if (estado === "Disponible") return "badge-success";
+    if (estado === "Stock limitado") return "badge-warning";
+    if (estado === "Riesgo") return "badge-warning";
+    return "badge-danger";
+  }
+
+  function renderMedicamentos(filterText) {
+    const root = document.getElementById("view-root");
+    const meds = MedicationService.list();
+    const q = (filterText || "").trim().toLowerCase();
+    const names = MedicationService.uniqueNames().filter(function (m) {
+      return !q || m.name.toLowerCase().indexOf(q) !== -1;
+    });
+
+    const cards = names.length === 0
+      ? UI.emptyState("Sin coincidencias", "Ningún medicamento coincide con la búsqueda.")
+      : names.map(function (m) {
+          const rows = MedicationService.byName(m.name);
+          return (
+            '<div class="card" style="margin-bottom:12px;">' +
+              '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;">' +
+                '<div><div class="card-title">' + m.name + '</div><div class="card-sub">' + m.presentation + '</div></div>' +
+                '<button class="btn btn-secondary btn-sm" data-copilot="' + m.name + '">Copiloto farmacológico</button>' +
+              '</div>' +
+              '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">' +
+                rows.map(function (r) {
+                  return (
+                    '<div style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:10px 12px;">' +
+                      '<div style="font-size:12px;font-weight:600;margin-bottom:4px;">' + r.facility + '</div>' +
+                      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                        '<span class="mono" style="font-size:11.5px;color:var(--color-text-muted);">' + r.stock + ' unid.</span>' +
+                        '<span class="badge ' + medStatusBadge(r.status) + '">' + r.status + '</span>' +
+                      '</div>' +
+                    '</div>'
+                  );
+                }).join("") +
+              '</div>' +
+            '</div>'
+          );
+        }).join("");
+
+    root.innerHTML =
+      viewHeader("medicamentos") +
+      '<div style="display:flex;align-items:center;gap:8px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:8px 12px;max-width:380px;margin-bottom:16px;">' +
+        '<svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="color:var(--color-text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+        '<input type="text" id="med-search" placeholder="Buscar medicamento…" style="border:none;outline:none;font-size:13px;width:100%;" value="' + (filterText || "") + '">' +
+      '</div>' +
+      '<div class="card" style="background:var(--color-surface-muted);border-style:dashed;margin-bottom:16px;">' +
+        '<p style="font-size:12px;color:var(--color-text-muted);">Disponibilidad de demostración por instalación. Los datos son sintéticos y no representan inventarios reales de la CSS.</p>' +
+      '</div>' +
+      cards;
+
+    document.getElementById("med-search").addEventListener("input", function (e) { renderMedicamentos(e.target.value); });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-copilot]"), function (btn) {
+      btn.addEventListener("click", function () { openCopilotoFarmacologico(btn.getAttribute("data-copilot"), filterText); });
+    });
+  }
+
+  function openCopilotoFarmacologico(medName, filterText) {
+    const patients = PatientService.list();
+    const rows = MedicationService.byName(medName);
+    const alternativas = SYNTHETIC_ALTERNATIVES[medName] || ["Sin alternativas registradas en esta base de demostración."];
+
+    Modal.open({
+      title: "Copiloto farmacológico",
+      body:
+        '<div class="form-field"><label>Paciente en revisión</label><select id="cf-patient">' +
+          (patients.length === 0 ? '<option>Sin pacientes registrados</option>' :
+            patients.map(function (p) { return '<option value="' + p.id + '">' + p.nombre + '</option>'; }).join("")) +
+        '</select></div>' +
+        '<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">Medicamento seleccionado</div>' +
+        '<div class="card" style="background:var(--color-surface-muted);margin-bottom:12px;"><strong>' + medName + '</strong></div>' +
+        '<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">Disponibilidad</div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">' +
+          rows.map(function (r) { return '<div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>' + r.facility + '</span><span class="badge ' + medStatusBadge(r.status) + '">' + r.status + '</span></div>'; }).join("") +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">Posibles alternativas para consideración profesional</div>' +
+        '<ul style="padding-left:18px;font-size:12.5px;margin-bottom:12px;">' + alternativas.map(function (a) { return '<li>' + a + '</li>'; }).join("") + '</ul>' +
+        '<div class="card" style="border-color:var(--color-warning);background:#FFFBEB;">' +
+          '<p style="font-size:12px;color:#92400E;">La IA no prescribe ni sustituye el criterio del profesional. El médico debe confirmar cualquier decisión.</p>' +
+        '</div>',
+      foot:
+        '<button class="btn btn-secondary" id="cf-close">Cerrar</button>' +
+        '<button class="btn btn-primary" id="cf-confirm">Confirmar revisión del médico</button>'
+    });
+    document.getElementById("cf-close").addEventListener("click", Modal.close);
+    document.getElementById("cf-confirm").addEventListener("click", function () {
+      const patientSelect = document.getElementById("cf-patient");
+      const patientId = patientSelect.value;
+      const patient = PatientService.get(patientId);
+      if (patient) {
+        TimelineService.add({
+          id: "TL-" + Date.now(), patientId: patientId, type: "medicamento",
+          title: "Revisión farmacológica confirmada", description: medName + ": disponibilidad y alternativas revisadas por el profesional (demo).",
+          date: new Date().toISOString().slice(0, 10),
+          actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+        });
+      }
+      Modal.close();
+      Toast.show("Revisión farmacológica confirmada por el profesional.", "success");
+      renderMedicamentos(filterText);
+    });
+  }
+
   function renderModuleStub(viewId) {
     const root = document.getElementById("view-root");
     const meta = VIEW_META[viewId];
@@ -1718,6 +2349,9 @@ textarea:focus-visible,
       return renderPacientes();
     }
     if (viewId === "agenda") return renderAgenda();
+    if (viewId === "preconsulta") { resetPrecheckDraft(null); return renderPreconsulta(); }
+    if (viewId === "consultas") return renderConsultas();
+    if (viewId === "medicamentos") return renderMedicamentos();
     return renderModuleStub(viewId);
   }
 
@@ -1734,6 +2368,7 @@ textarea:focus-visible,
   function init() {
     seedPatientData();
     seedAppointmentData();
+    seedMedicationData();
     renderRoleGate();
 
     const savedSession = StorageService.get("session_role", null);
