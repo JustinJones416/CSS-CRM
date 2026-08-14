@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CSS Nexus AI · CRM Sanitario Conceptual</title>
-<meta name="description" content="Prototipo conceptual de CRM sanitario. Entorno de demostración con datos sintéticos.">
+<title>Nexus Clinical · CRM Sanitario Inteligente</title>
+<meta name="description" content="Nexus Clinical · Suite de gestión clínica centrada en el paciente.">
 
 <style>
 /* Fuentes empaquetadas directamente en el archivo (subset latin) — no dependen de
@@ -55,8 +55,9 @@
   --radius-md: 12px;
   --radius-lg: 18px;
 
-  --shadow-sm: 0 1px 3px rgba(15,23,42,.06);
-  --shadow-md: 0 8px 24px rgba(15,23,42,.08);
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.05);
+  --shadow-md: 0 4px 12px rgba(15,23,42,.06), 0 12px 32px rgba(15,23,42,.08);
+  --shadow-lg: 0 8px 20px rgba(15,23,42,.08), 0 24px 48px rgba(15,23,42,.10);
 
   --sidebar-w: 248px;
   --topbar-h: 64px;
@@ -382,6 +383,7 @@ textarea:focus-visible,
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   padding: 20px;
+  transition: box-shadow var(--transition), border-color var(--transition), transform var(--transition);
 }
 .card-title {
   font-family: var(--font-head);
@@ -398,24 +400,43 @@ textarea:focus-visible,
   margin-bottom: 24px;
 }
 .metric-card {
+  position: relative;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: 18px 20px;
+  padding: 20px 22px;
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
 }
+.metric-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.metric-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+}
+.metric-card:hover::before { opacity: 1; }
 .metric-card__label {
   font-size: 12px;
   color: var(--color-text-muted);
   font-weight: 500;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   display: flex; align-items: center; justify-content: space-between;
 }
 .metric-card__value {
   font-family: var(--font-mono);
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 500;
   color: var(--color-text);
+  letter-spacing: -.01em;
 }
 .metric-card__value.is-empty {
   font-family: var(--font-body);
@@ -423,7 +444,15 @@ textarea:focus-visible,
   color: var(--color-text-faint);
   font-weight: 500;
 }
-.metric-card__icon { width: 16px; height: 16px; color: var(--color-text-faint); }
+.metric-card__icon {
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.metric-card__icon svg { width: 15px; height: 15px; }
 
 .section-block {
   background: var(--color-surface);
@@ -458,6 +487,8 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--color-border);
 }
 .table tr:last-child td { border-bottom: none; }
+.table tbody tr { transition: background var(--transition); }
+.table tbody tr:hover { background: var(--color-surface-muted); }
 
 .empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -676,8 +707,8 @@ textarea:focus-visible,
     <div class="gate-brand">
       <div class="gate-brand__mark">CN</div>
       <div>
-        <div class="gate-brand__title">CSS Nexus AI</div>
-        <div class="gate-brand__sub">CRM SANITARIO CONCEPTUAL · ENTORNO DE DEMOSTRACIÓN</div>
+        <div class="gate-brand__title">Nexus Clinical</div>
+        <div class="gate-brand__sub">SUITE DE GESTIÓN CLÍNICA</div>
       </div>
     </div>
     <h1 style="font-size:17px;font-weight:700;">Selecciona un rol para ingresar al prototipo</h1>
@@ -692,8 +723,8 @@ textarea:focus-visible,
     </div>
 
     <div class="gate-foot">
-      <strong style="color:var(--color-text-muted);font-weight:600;">Aviso de entorno</strong>
-      Prototipo funcional con datos sintéticos. No representa información institucional, médica ni de inventario real de la Caja de Seguro Social. No implementa autenticación, cifrado ni RBAC real en esta fase.
+      <strong style="color:var(--color-text-muted);font-weight:600;">Acceso por rol</strong>
+      Cada rol determina los módulos y acciones disponibles dentro de la plataforma.
     </div>
   </div>
 </div>
@@ -707,7 +738,7 @@ textarea:focus-visible,
     <div class="sidebar__brand">
       <div class="sidebar__mark">CN</div>
       <div>
-        <div class="sidebar__name">Nexus AI</div>
+        <div class="sidebar__name">Nexus Clinical</div>
         <div class="sidebar__tag">CSS · Demo</div>
       </div>
     </div>
@@ -715,8 +746,8 @@ textarea:focus-visible,
     <nav class="sidebar__nav" id="sidebar-nav" aria-label="Navegación principal"></nav>
 
     <div class="sidebar__footer">
-      <strong>Entorno de demostración</strong>
-      Datos sintéticos · Sin conexión institucional real
+      <strong>Nexus Clinical</strong>
+      Gestión clínica y de pacientes
     </div>
   </aside>
 
@@ -731,15 +762,11 @@ textarea:focus-visible,
     </div>
 
     <div class="topbar__right">
-      <div class="demo-pill">
-        <span class="demo-pill__dot"></span>
-        <span class="demo-pill__text">ENTORNO DE DEMOSTRACIÓN · DATOS SINTÉTICOS</span>
-      </div>
       <div class="user-chip">
         <div class="user-chip__avatar" id="user-avatar">--</div>
         <div class="user-chip__meta">
           <div class="user-chip__role" id="user-role-label">Sin rol</div>
-          <div class="user-chip__sub">rol de demostración</div>
+          <div class="user-chip__sub">rol activo</div>
         </div>
         <button class="user-chip__switch" id="btn-switch-role">Cambiar rol</button>
       </div>
@@ -846,7 +873,8 @@ textarea:focus-visible,
     medications: [],
     documents: [],
     followUps: [],
-    timeline: []
+    timeline: [],
+    docFilterPatient: null
   };
 
   /* ============================================================
@@ -859,22 +887,22 @@ textarea:focus-visible,
 
   const SYNTHETIC_PATIENTS = [
     {
-      id: "PAC-0001", nombre: "Marta Solís (demo)", identificacion: "8-DEMO-0001", edad: 34,
-      telefono: "6000-0001 (demo)", correo: "marta.demo@correo-demo.com", estado: "Activo",
+      id: "PAC-0001", nombre: "Marta Solís", identificacion: "8-DEMO-0001", edad: 34,
+      telefono: "6000-0001", correo: "marta.solis@correo.com", estado: "Activo",
       alergias: ["Penicilina (declarada)"], medicamentos: ["Losartán 50 mg (declarado)"],
       antecedentes: ["Hipertensión (declarado)"], condiciones: ["Ninguna registrada"],
-      proximaAtencion: { fecha: "2026-08-18", medico: "Dr. Torres (demo)", modalidad: "Presencial", especialidad: "Medicina general", estado: "Confirmada" }
+      proximaAtencion: { fecha: "2026-08-18", medico: "Dr. Torres", modalidad: "Presencial", especialidad: "Medicina general", estado: "Confirmada" }
     },
     {
-      id: "PAC-0002", nombre: "Julio Herrera (demo)", identificacion: "8-DEMO-0002", edad: 58,
-      telefono: "6000-0002 (demo)", correo: "julio.demo@correo-demo.com", estado: "En seguimiento",
+      id: "PAC-0002", nombre: "Julio Herrera", identificacion: "8-DEMO-0002", edad: 58,
+      telefono: "6000-0002", correo: "julio.herrera@correo.com", estado: "En seguimiento",
       alergias: ["Ninguna declarada"], medicamentos: ["Metformina 850 mg (declarado)"],
       antecedentes: ["Diabetes tipo 2 (declarado)"], condiciones: ["Control metabólico (declarado)"],
-      proximaAtencion: { fecha: "2026-08-20", medico: "Dra. Núñez (demo)", modalidad: "Virtual", especialidad: "Endocrinología", estado: "Programada" }
+      proximaAtencion: { fecha: "2026-08-20", medico: "Dra. Núñez", modalidad: "Virtual", especialidad: "Endocrinología", estado: "Programada" }
     },
     {
-      id: "PAC-0003", nombre: "Ana Ríos (demo)", identificacion: "8-DEMO-0003", edad: 27,
-      telefono: "6000-0003 (demo)", correo: "ana.demo@correo-demo.com", estado: "Activo",
+      id: "PAC-0003", nombre: "Ana Ríos", identificacion: "8-DEMO-0003", edad: 27,
+      telefono: "6000-0003", correo: "ana.rios@correo.com", estado: "Activo",
       alergias: ["Sulfas (declarada)"], medicamentos: ["Ninguno registrado"],
       antecedentes: ["Ninguno registrado"], condiciones: ["Ninguna registrada"],
       proximaAtencion: null
@@ -884,9 +912,9 @@ textarea:focus-visible,
   function seedPatientData() {
     StorageService.seed("patients", SYNTHETIC_PATIENTS);
     StorageService.seed("timeline", [
-      { id: "TL-0001", patientId: "PAC-0001", type: "preconsulta", title: "Preconsulta registrada", description: "Motivo: control de presión arterial (demo).", date: "2026-08-13", actor: "Recepción (demo)", metadata: {} },
-      { id: "TL-0002", patientId: "PAC-0001", type: "cita", title: "Cita creada", description: "Medicina general, modalidad presencial (demo).", date: "2026-08-13", actor: "Recepción (demo)", metadata: {} },
-      { id: "TL-0003", patientId: "PAC-0002", type: "seguimiento", title: "Seguimiento registrado", description: "Control de valores de glucosa (demo).", date: "2026-08-10", actor: "Dra. Núñez (demo)", metadata: {} }
+      { id: "TL-0001", patientId: "PAC-0001", type: "preconsulta", title: "Preconsulta registrada", description: "Motivo: control de presión arterial.", date: "2026-08-13", actor: "Recepción", metadata: {} },
+      { id: "TL-0002", patientId: "PAC-0001", type: "cita", title: "Cita creada", description: "Medicina general, modalidad presencial.", date: "2026-08-13", actor: "Recepción", metadata: {} },
+      { id: "TL-0003", patientId: "PAC-0002", type: "seguimiento", title: "Seguimiento registrado", description: "Control de valores de glucosa.", date: "2026-08-10", actor: "Dra. Núñez", metadata: {} }
     ]);
   }
 
@@ -935,17 +963,17 @@ textarea:focus-visible,
   const APPOINTMENT_STATUSES = ["Programada", "Confirmada", "En consulta", "Completada", "Cancelada", "No asistió"];
 
   const SYNTHETIC_DOCTORS = [
-    { id: "MED-01", nombre: "Dr. Torres (demo)", especialidad: "Medicina general" },
-    { id: "MED-02", nombre: "Dra. Núñez (demo)", especialidad: "Endocrinología" },
-    { id: "MED-03", nombre: "Dr. Espino (demo)", especialidad: "Cardiología" },
-    { id: "MED-04", nombre: "Dra. Bethancourt (demo)", especialidad: "Pediatría" }
+    { id: "MED-01", nombre: "Dr. Torres", especialidad: "Medicina general" },
+    { id: "MED-02", nombre: "Dra. Núñez", especialidad: "Endocrinología" },
+    { id: "MED-03", nombre: "Dr. Espino", especialidad: "Cardiología" },
+    { id: "MED-04", nombre: "Dra. Bethancourt", especialidad: "Pediatría" }
   ];
 
   function seedAppointmentData() {
     StorageService.seed("doctors", SYNTHETIC_DOCTORS);
     StorageService.seed("appointments", [
-      { id: "CITA-0001", patientId: "PAC-0001", patientName: "Marta Solís (demo)", doctorId: "MED-01", doctorName: "Dr. Torres (demo)", especialidad: "Medicina general", modalidad: "Presencial", fecha: "2026-08-18", hora: "09:00", estado: "Confirmada" },
-      { id: "CITA-0002", patientId: "PAC-0002", patientName: "Julio Herrera (demo)", doctorId: "MED-02", doctorName: "Dra. Núñez (demo)", especialidad: "Endocrinología", modalidad: "Virtual", fecha: "2026-08-20", hora: "11:30", estado: "Programada" }
+      { id: "CITA-0001", patientId: "PAC-0001", patientName: "Marta Solís", doctorId: "MED-01", doctorName: "Dr. Torres", especialidad: "Medicina general", modalidad: "Presencial", fecha: "2026-08-18", hora: "09:00", estado: "Confirmada" },
+      { id: "CITA-0002", patientId: "PAC-0002", patientName: "Julio Herrera", doctorId: "MED-02", doctorName: "Dra. Núñez", especialidad: "Endocrinología", modalidad: "Virtual", fecha: "2026-08-20", hora: "11:30", estado: "Programada" }
     ]);
   }
 
@@ -953,7 +981,7 @@ textarea:focus-visible,
      MEDICATION SERVICE — PharmaSync
      ============================================================ */
   const MED_STATUSES = ["Disponible", "Stock limitado", "Riesgo", "Agotado"];
-  const MED_FACILITIES = ["Policlínica Central (demo)", "Centro de Salud Norte (demo)", "Clínica Comunitaria Este (demo)"];
+  const MED_FACILITIES = ["Policlínica Central", "Centro de Salud Norte", "Clínica Comunitaria Este"];
 
   const SYNTHETIC_MEDICATIONS = [
     { id: "MED-ITEM-01", name: "Losartán 50 mg", presentation: "Tableta", facility: MED_FACILITIES[0], stock: 420, status: "Disponible" },
@@ -994,6 +1022,38 @@ textarea:focus-visible,
       return MedicationService.list().filter(function (m) { return m.name === name; });
     }
   };
+
+  /* ============================================================
+     DOCUMENT SERVICE — Documentación de consulta
+     ============================================================ */
+  const DOCUMENT_TYPES = [
+    { id: "receta", label: "Receta" },
+    { id: "incapacidad", label: "Incapacidad" },
+    { id: "referencia", label: "Referencia" },
+    { id: "orden_laboratorio", label: "Orden de laboratorio" },
+    { id: "orden_imagen", label: "Orden de imagen" },
+    { id: "resumen_consulta", label: "Resumen de consulta" }
+  ];
+
+  const DocumentService = {
+    list: function () { return StorageService.get("documents", []); },
+    byPatient: function (patientId) {
+      return DocumentService.list().filter(function (d) { return d.patientId === patientId; });
+    },
+    nextId: function () { return "DOC-" + String(DocumentService.list().length + 1).padStart(4, "0"); },
+    create: function (entry) {
+      return StorageService.update("documents", function (list) {
+        list = list || [];
+        list.push(entry);
+        return list;
+      }, []);
+    }
+  };
+
+  function docTypeLabel(typeId) {
+    const t = DOCUMENT_TYPES.filter(function (t) { return t.id === typeId; })[0];
+    return t ? t.label : typeId;
+  }
 
   const AppointmentService = {
     list: function () { return StorageService.get("appointments", []); },
@@ -1053,7 +1113,7 @@ textarea:focus-visible,
     }
   };
 
-  /* Resumen generado localmente por el asistente de demostración.
+  /* Resumen generado localmente por el asistente de orientación clínica.
      No es un diagnóstico: solo organiza la información declarada
      por el paciente para apoyar al profesional. */
   function generarResumenPreliminar(draft) {
@@ -1070,7 +1130,7 @@ textarea:focus-visible,
   /* ============================================================
      CONSULTA SERVICE — Atención médica
      ============================================================ */
-  const CONSULTATION_FACILITIES = ["Policlínica Central (demo)", "Centro de Salud Norte (demo)", "Clínica Comunitaria Este (demo)"];
+  const CONSULTATION_FACILITIES = ["Policlínica Central", "Centro de Salud Norte", "Clínica Comunitaria Este"];
 
   const ConsultaService = {
     list: function () { return StorageService.get("consultations", []); },
@@ -1105,7 +1165,7 @@ textarea:focus-visible,
   };
 
   /* ============================================================
-     ROLES DE DEMOSTRACIÓN
+     ROLES DEL SISTEMA
      ============================================================ */
   const ROLES = [
     { id: "paciente", label: "Paciente", desc: "Consulta su historial, citas y documentos.", initials: "PA" },
@@ -1135,16 +1195,16 @@ textarea:focus-visible,
   ];
 
   const VIEW_META = {
-    dashboard:      { eyebrow: "Panel general", title: "Dashboard", desc: "Información accionable derivada de los datos existentes en el entorno de demostración." },
+    dashboard:      { eyebrow: "Panel general", title: "Dashboard", desc: "Información accionable derivada de la actividad reciente." },
     pacientes:      { eyebrow: "Patient CRM", title: "Pacientes", desc: "Listado y ficha 360° de cada paciente registrado en el prototipo." },
     agenda:         { eyebrow: "Agenda CRM", title: "Agenda", desc: "Calendario de citas, estados y reprogramación." },
     preconsulta:    { eyebrow: "Preconsulta inteligente", title: "Preconsulta", desc: "Flujo guiado de recolección de información previa a la consulta." },
-    consultas:      { eyebrow: "Atención médica", title: "Consultas", desc: "Registro de consultas presenciales y virtuales de demostración." },
-    medicamentos:   { eyebrow: "PharmaSync", title: "Medicamentos", desc: "Inventario sintético y copiloto farmacológico de apoyo informativo." },
-    documentos:     { eyebrow: "Documentación clínica", title: "Documentos", desc: "Documentos de demostración asociados a cada paciente." },
+    consultas:      { eyebrow: "Atención médica", title: "Consultas", desc: "Registro de consultas presenciales y virtuales." },
+    medicamentos:   { eyebrow: "PharmaSync", title: "Medicamentos", desc: "Disponibilidad por instalación y copiloto farmacológico de apoyo informativo." },
+    documentos:     { eyebrow: "Documentación clínica", title: "Documentos", desc: "Documentos clínicos asociados a cada paciente." },
     seguimiento:    { eyebrow: "Continuidad del cuidado", title: "Seguimiento", desc: "Registro y control de seguimientos posteriores a la consulta." },
     analitica:      { eyebrow: "Analítica", title: "Analítica", desc: "Métricas derivadas exclusivamente de los datos existentes en este entorno." },
-    configuracion:  { eyebrow: "Sistema", title: "Configuración", desc: "Rol activo, entorno de demostración y preferencias del prototipo." }
+    configuracion:  { eyebrow: "Sistema", title: "Configuración", desc: "Rol activo y preferencias del sistema." }
   };
 
   /* ============================================================
@@ -1272,7 +1332,7 @@ textarea:focus-visible,
 
     renderSidebarNav();
     navigateTo("dashboard");
-    Toast.show("Sesión de demostración iniciada como " + role.label + ".", "success");
+    Toast.show("Sesión iniciada como " + role.label + ".", "success");
   }
 
   document.getElementById("btn-switch-role").addEventListener("click", function () {
@@ -1386,7 +1446,7 @@ textarea:focus-visible,
       ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState(
           patients.length === 0 ? "Sin pacientes registrados" : "Sin coincidencias",
           patients.length === 0
-            ? "Registra el primer paciente de demostración para comenzar a probar el flujo del CRM."
+            ? "Registra el primer paciente para comenzar a usar el CRM."
             : "Ningún paciente coincide con la búsqueda. Ajusta el término e intenta de nuevo."
         ) + '</td></tr>'
       : filtered.map(function (p) {
@@ -1432,14 +1492,14 @@ textarea:focus-visible,
 
   function openNewPatientModal() {
     Modal.open({
-      title: "Nuevo paciente de demostración",
+      title: "Nuevo paciente",
       body:
-        '<div class="form-field"><label>Nombre completo</label><input type="text" id="np-nombre" placeholder="Ej. Carlos Vega (demo)"></div>' +
+        '<div class="form-field"><label>Nombre completo</label><input type="text" id="np-nombre" placeholder="Ej. Carlos Vega"></div>' +
         '<div class="form-field"><label>Edad</label><input type="number" id="np-edad" min="0" max="120" placeholder="Ej. 41"></div>' +
         '<div class="form-field"><label>Estado</label><select id="np-estado">' +
           PATIENT_STATUSES.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join("") +
         '</select></div>' +
-        '<div class="form-field__hint">Todos los datos ingresados aquí son sintéticos y quedan claramente marcados como de demostración.</div>',
+        '<div class="form-field__hint">Los datos ingresados quedan asociados a este paciente dentro de la plataforma.</div>',
       foot:
         '<button class="btn btn-secondary" id="np-cancel">Cancelar</button>' +
         '<button class="btn btn-primary" id="np-save">Guardar paciente</button>'
@@ -1455,15 +1515,15 @@ textarea:focus-visible,
       }
       const id = PatientService.nextId();
       const patient = {
-        id: id, nombre: nombre + " (demo)", identificacion: "8-DEMO-" + id.split("-")[1],
-        edad: edad, telefono: "Sin registrar (demo)", correo: "Sin registrar (demo)", estado: estado,
+        id: id, nombre: nombre + "", identificacion: "8-DEMO-" + id.split("-")[1],
+        edad: edad, telefono: "Sin registrar", correo: "Sin registrar", estado: estado,
         alergias: ["Sin registrar"], medicamentos: ["Sin registrar"], antecedentes: ["Sin registrar"], condiciones: ["Sin registrar"],
         proximaAtencion: null
       };
       PatientService.create(patient);
-      TimelineService.add({ id: "TL-" + Date.now(), patientId: id, type: "registro", title: "Paciente registrado", description: "Alta de paciente en el entorno de demostración.", date: new Date().toISOString().slice(0, 10), actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {} });
+      TimelineService.add({ id: "TL-" + Date.now(), patientId: id, type: "registro", title: "Paciente registrado", description: "Alta de paciente en el sistema.", date: new Date().toISOString().slice(0, 10), actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {} });
       Modal.close();
-      Toast.show("Paciente de demostración creado.", "success");
+      Toast.show("Paciente creado.", "success");
       navigateToPatient(id);
     });
   }
@@ -1481,7 +1541,7 @@ textarea:focus-visible,
   }
 
   function pendingActionToast(label) {
-    Toast.show(label + " estará disponible en un sprint posterior del roadmap.", "accent");
+    Toast.show(label + " estará disponible próximamente.", "accent");
   }
 
   function renderPatient360(id) {
@@ -1494,7 +1554,7 @@ textarea:focus-visible,
       { label: "Nueva preconsulta", handler: function () { startPreconsultaForPatient(p.id); } },
       { label: "Agendar cita", handler: function () { openNewAppointmentModal(p.id); } },
       { label: "Iniciar videoconsulta", handler: function () { navigateTo("consultas"); } },
-      { label: "Ver documentos", handler: function () { pendingActionToast("El panel de documentos"); } },
+      { label: "Ver documentos", handler: function () { AppState.docFilterPatient = p.id; navigateTo("documentos"); } },
       { label: "Ver medicamentos", handler: function () { navigateTo("medicamentos"); } },
       { label: "Agregar seguimiento", handler: function () { openAddFollowUpModal(p.id); } }
     ];
@@ -1554,7 +1614,7 @@ textarea:focus-visible,
                 '<div>' + p.proximaAtencion.especialidad + ' · ' + p.proximaAtencion.modalidad + '</div>' +
                 '<span class="badge badge-accent" style="margin-top:6px;">' + p.proximaAtencion.estado + '</span>' +
               '</div>'
-            : UI.emptyState("Sin próxima atención", "Este paciente no tiene citas programadas en el entorno de demostración.")
+            : UI.emptyState("Sin próxima atención", "Este paciente no tiene citas programadas.")
           ) +
 
           UI.sectionBlock("Acciones", '', '<div style="padding:12px 16px 16px;display:flex;flex-direction:column;gap:8px;">' +
@@ -1598,7 +1658,7 @@ textarea:focus-visible,
         '<div class="form-field"><label>Medicamentos registrados (separados por coma)</label><input type="text" id="ep-medicamentos" value="' + p.medicamentos.join(", ") + '"></div>' +
         '<div class="form-field"><label>Antecedentes (separados por coma)</label><input type="text" id="ep-antecedentes" value="' + p.antecedentes.join(", ") + '"></div>' +
         '<div class="form-field"><label>Condiciones registradas (separadas por coma)</label><input type="text" id="ep-condiciones" value="' + p.condiciones.join(", ") + '"></div>' +
-        '<div class="form-field__hint">Todos los campos permanecen como datos sintéticos del entorno de demostración.</div>',
+        '<div class="form-field__hint"></div>',
       foot:
         '<button class="btn btn-secondary" id="ep-cancel">Cancelar</button>' +
         '<button class="btn btn-primary" id="ep-save">Guardar cambios</button>'
@@ -1622,7 +1682,7 @@ textarea:focus-visible,
       PatientService.update(id, changes);
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: id, type: "edicion",
-        title: "Datos del paciente actualizados", description: "Edición de ficha desde Patient 360° (demo).",
+        title: "Datos del paciente actualizados", description: "Edición de ficha desde Patient 360°.",
         date: new Date().toISOString().slice(0, 10),
         actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
       });
@@ -1637,7 +1697,7 @@ textarea:focus-visible,
       title: "Agregar seguimiento",
       body:
         '<div class="form-field"><label>Motivo</label><input type="text" id="fu-motivo" placeholder="Ej. Control de presión arterial"></div>' +
-        '<div class="form-field"><label>Notas</label><textarea id="fu-notas" rows="3" placeholder="Notas del seguimiento (demo)"></textarea></div>',
+        '<div class="form-field"><label>Notas</label><textarea id="fu-notas" rows="3" placeholder="Notas del seguimiento"></textarea></div>',
       foot:
         '<button class="btn btn-secondary" id="fu-cancel">Cancelar</button>' +
         '<button class="btn btn-primary" id="fu-save">Guardar seguimiento</button>'
@@ -1650,7 +1710,7 @@ textarea:focus-visible,
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: patientId, type: "seguimiento",
         title: "Seguimiento: " + motivo,
-        description: notas || "Sin notas adicionales (demo).",
+        description: notas || "Sin notas adicionales.",
         date: new Date().toISOString().slice(0, 10),
         actor: AppState.currentUser ? AppState.currentUser.label : "Sistema",
         metadata: {}
@@ -1686,7 +1746,7 @@ textarea:focus-visible,
     const rows = filtered.length === 0
       ? '<tr><td colspan="6" style="padding:0;">' + UI.emptyState(
           all.length === 0 ? "Sin citas registradas" : "Sin coincidencias",
-          all.length === 0 ? "Crea la primera cita de demostración para comenzar a probar la agenda." : "Ningún resultado coincide con el filtro seleccionado."
+          all.length === 0 ? "Crea la primera cita para comenzar a usar la agenda." : "Ningún resultado coincide con el filtro seleccionado."
         ) + '</td></tr>'
       : filtered.map(function (a) {
           return (
@@ -1779,7 +1839,7 @@ textarea:focus-visible,
       AppointmentService.create(appt);
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: patientId, type: "cita",
-        title: "Cita creada", description: especialidad + " · " + modalidad + " · " + fecha + " " + hora + " (demo).",
+        title: "Cita creada", description: especialidad + " · " + modalidad + " · " + fecha + " " + hora + ".",
         date: new Date().toISOString().slice(0, 10),
         actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
       });
@@ -1829,7 +1889,7 @@ textarea:focus-visible,
       AppointmentService.reschedule(id, fecha, hora);
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: appt.patientId, type: "cita",
-        title: "Cita reprogramada", description: "Nueva fecha: " + fecha + " " + hora + " (demo).",
+        title: "Cita reprogramada", description: "Nueva fecha: " + fecha + " " + hora + ".",
         date: new Date().toISOString().slice(0, 10),
         actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
       });
@@ -1881,27 +1941,27 @@ textarea:focus-visible,
     } else if (precheckStep === 1) {
       stepBody = '<div class="form-field"><label>Motivo de consulta</label><input type="text" id="pc-field" placeholder="Ej. Dolor de cabeza persistente" value="' + precheckDraft.motivo + '"></div>';
     } else if (precheckStep === 2) {
-      stepBody = '<div class="form-field"><label>Síntomas</label><textarea id="pc-field" rows="3" placeholder="Describe los síntomas (demo)">' + precheckDraft.sintomas + '</textarea></div>';
+      stepBody = '<div class="form-field"><label>Síntomas</label><textarea id="pc-field" rows="3" placeholder="Describe los síntomas">' + precheckDraft.sintomas + '</textarea></div>';
     } else if (precheckStep === 3) {
       stepBody = '<div class="form-field"><label>Duración</label><input type="text" id="pc-field" placeholder="Ej. 3 días" value="' + precheckDraft.duracion + '"></div>';
     } else if (precheckStep === 4) {
       stepBody = '<div class="form-field"><label>Intensidad autopercibida (1 a 10)</label><input type="number" id="pc-field" min="1" max="10" value="' + precheckDraft.intensidad + '"></div>';
     } else if (precheckStep === 5) {
-      stepBody = '<div class="form-field"><label>Antecedentes</label><textarea id="pc-field" rows="2" placeholder="Antecedentes relevantes (demo)">' + precheckDraft.antecedentes + '</textarea></div>';
+      stepBody = '<div class="form-field"><label>Antecedentes</label><textarea id="pc-field" rows="2" placeholder="Antecedentes relevantes">' + precheckDraft.antecedentes + '</textarea></div>';
     } else if (precheckStep === 6) {
-      stepBody = '<div class="form-field"><label>Medicamentos actuales</label><textarea id="pc-field" rows="2" placeholder="Medicamentos que toma actualmente (demo)">' + precheckDraft.medicamentos + '</textarea></div>';
+      stepBody = '<div class="form-field"><label>Medicamentos actuales</label><textarea id="pc-field" rows="2" placeholder="Medicamentos que toma actualmente">' + precheckDraft.medicamentos + '</textarea></div>';
     } else if (precheckStep === 7) {
-      stepBody = '<div class="form-field"><label>Alergias</label><textarea id="pc-field" rows="2" placeholder="Alergias declaradas (demo)">' + precheckDraft.alergias + '</textarea></div>';
+      stepBody = '<div class="form-field"><label>Alergias</label><textarea id="pc-field" rows="2" placeholder="Alergias declaradas">' + precheckDraft.alergias + '</textarea></div>';
     } else if (precheckStep === 8) {
       stepBody =
         '<div class="form-field"><label>Archivos o imágenes (opcional)</label><input type="text" id="pc-field" placeholder="Ej. foto_sintoma.jpg (simulado)" value="' + precheckDraft.archivos + '"></div>' +
-        '<div class="form-field__hint">En este entorno de demostración no se procesan archivos reales; solo se registra el nombre indicado como referencia.</div>';
+        '<div class="form-field__hint">El archivo queda referenciado dentro de la preconsulta para revisión del profesional.</div>';
     } else if (precheckStep === 9) {
       const resumen = generarResumenPreliminar(precheckDraft);
       stepBody =
         '<div class="card" style="background:var(--color-surface-muted);border-style:dashed;margin-bottom:16px;">' +
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
-            '<span class="badge badge-accent">Asistente IA de demostración</span>' +
+            '<span class="badge badge-accent">Asistente de orientación clínica</span>' +
           '</div>' +
           '<p style="font-size:13px;line-height:1.6;">' + resumen + '</p>' +
         '</div>' +
@@ -1963,7 +2023,7 @@ textarea:focus-visible,
     PreconsultaService.create(entry);
     TimelineService.add({
       id: "TL-" + Date.now(), patientId: precheckDraft.patientId, type: "preconsulta",
-      title: "Preconsulta registrada", description: "Motivo: " + (precheckDraft.motivo || "sin especificar") + " (demo).",
+      title: "Preconsulta registrada", description: "Motivo: " + (precheckDraft.motivo || "sin especificar") + ".",
       date: new Date().toISOString().slice(0, 10),
       actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
     });
@@ -2032,7 +2092,7 @@ textarea:focus-visible,
         const consulta = ConsultaService.createFromAppointment(appt);
         TimelineService.add({
           id: "TL-" + Date.now(), patientId: appt.patientId, type: "consulta",
-          title: "Consulta médica iniciada", description: appt.especialidad + " · " + appt.modalidad + " (demo).",
+          title: "Consulta médica iniciada", description: appt.especialidad + " · " + appt.modalidad + ".",
           date: new Date().toISOString().slice(0, 10),
           actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
         });
@@ -2076,17 +2136,19 @@ textarea:focus-visible,
             (c.notas.length === 0 ? '<div style="color:var(--color-text-faint);font-size:12.5px;margin-bottom:12px;">Sin notas registradas.</div>' :
               c.notas.map(function (n) { return '<div style="padding:8px 0;border-bottom:1px solid var(--color-border);font-size:13px;"><span class="mono" style="color:var(--color-text-muted);font-size:11px;">' + n.fecha + '</span><div>' + n.texto + '</div></div>'; }).join("")) +
             (c.estado !== "Completada"
-              ? '<div class="form-field" style="margin-top:12px;"><label>Agregar nota</label><textarea id="cd-nota" rows="3" placeholder="Notas de la consulta (demo)"></textarea></div><button class="btn btn-secondary btn-sm" id="cd-save-note">Guardar nota</button>'
+              ? '<div class="form-field" style="margin-top:12px;"><label>Agregar nota</label><textarea id="cd-nota" rows="3" placeholder="Notas de la consulta"></textarea></div><button class="btn btn-secondary btn-sm" id="cd-save-note">Guardar nota</button>'
               : '') +
           '</div>') +
         '</div>' +
         '<div>' +
           UI.sectionBlock("Detalle de la cita", '', infoBlock) +
+          UI.sectionBlock("Documentos", '', '<div style="padding:16px 20px;"><button class="btn btn-secondary btn-sm" id="cd-new-doc" style="width:100%;">Generar documento</button></div>') +
           (c.estado !== "Completada" ? UI.sectionBlock("Finalizar", '', '<div style="padding:16px 20px;"><button class="btn btn-primary" id="cd-complete" style="width:100%;">Marcar como completada</button></div>') : '') +
         '</div>' +
       '</div>';
 
     document.getElementById("back-to-consultas").addEventListener("click", renderConsultas);
+    document.getElementById("cd-new-doc").addEventListener("click", function () { openNewDocumentModal(c.patientId); });
     const noteBtn = document.getElementById("cd-save-note");
     if (noteBtn) noteBtn.addEventListener("click", function () {
       const val = document.getElementById("cd-nota").value.trim();
@@ -2104,8 +2166,8 @@ textarea:focus-visible,
             '<div style="width:56px;height:56px;border-radius:14px;background:var(--color-surface-muted);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:var(--color-text-muted);">' +
               '<svg viewBox="0 0 24 24" width="26" height="26" fill="none"><rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="m16 10 5-3v10l-5-3" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>' +
             '</div>' +
-            '<p style="font-size:13px;color:var(--color-text-muted);">Interfaz de videoconsulta de demostración.</p>' +
-            '<span class="badge badge-warning" style="margin-top:8px;">DEMO · SIN CONEXIÓN MÉDICA REAL</span>' +
+            '<p style="font-size:13px;color:var(--color-text-muted);">Vista previa de la interfaz de videollamada.</p>' +
+            '<span class="badge badge-warning" style="margin-top:8px;">VIDEOLLAMADA AÚN NO CONECTADA A UN PROVEEDOR</span>' +
           '</div>',
         foot: '<button class="btn btn-primary" id="video-close" style="width:100%;">Cerrar</button>'
       });
@@ -2117,7 +2179,7 @@ textarea:focus-visible,
       AppointmentService.updateStatus(c.appointmentId, "Completada");
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: c.patientId, type: "consulta",
-        title: "Consulta completada", description: c.especialidad + " · " + c.modalidad + " (demo).",
+        title: "Consulta completada", description: c.especialidad + " · " + c.modalidad + ".",
         date: new Date().toISOString().slice(0, 10),
         actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
       });
@@ -2161,7 +2223,7 @@ textarea:focus-visible,
       AppointmentService.update(id, { doctorId: doctorId, doctorName: doctor.nombre, especialidad: especialidad, modalidad: modalidad, fecha: fecha, hora: hora });
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: appt.patientId, type: "cita",
-        title: "Cita editada", description: doctor.nombre + " · " + especialidad + " · " + modalidad + " · " + fecha + " " + hora + " (demo).",
+        title: "Cita editada", description: doctor.nombre + " · " + especialidad + " · " + modalidad + " · " + fecha + " " + hora + ".",
         date: new Date().toISOString().slice(0, 10),
         actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
       });
@@ -2223,7 +2285,7 @@ textarea:focus-visible,
         '<input type="text" id="med-search" placeholder="Buscar medicamento…" style="border:none;outline:none;font-size:13px;width:100%;" value="' + (filterText || "") + '">' +
       '</div>' +
       '<div class="card" style="background:var(--color-surface-muted);border-style:dashed;margin-bottom:16px;">' +
-        '<p style="font-size:12px;color:var(--color-text-muted);">Disponibilidad de demostración por instalación. Los datos son sintéticos y no representan inventarios reales de la CSS.</p>' +
+        '<p style="font-size:12px;color:var(--color-text-muted);"></p>' +
       '</div>' +
       cards;
 
@@ -2236,7 +2298,7 @@ textarea:focus-visible,
   function openCopilotoFarmacologico(medName, filterText) {
     const patients = PatientService.list();
     const rows = MedicationService.byName(medName);
-    const alternativas = SYNTHETIC_ALTERNATIVES[medName] || ["Sin alternativas registradas en esta base de demostración."];
+    const alternativas = SYNTHETIC_ALTERNATIVES[medName] || ["Sin alternativas registradas para este medicamento."];
 
     Modal.open({
       title: "Copiloto farmacológico",
@@ -2268,7 +2330,7 @@ textarea:focus-visible,
       if (patient) {
         TimelineService.add({
           id: "TL-" + Date.now(), patientId: patientId, type: "medicamento",
-          title: "Revisión farmacológica confirmada", description: medName + ": disponibilidad y alternativas revisadas por el profesional (demo).",
+          title: "Revisión farmacológica confirmada", description: medName + ": disponibilidad y alternativas revisadas por el profesional.",
           date: new Date().toISOString().slice(0, 10),
           actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
         });
@@ -2277,6 +2339,180 @@ textarea:focus-visible,
       Toast.show("Revisión farmacológica confirmada por el profesional.", "success");
       renderMedicamentos(filterText);
     });
+  }
+
+  /* ============================================================
+     VISTA: DOCUMENTOS
+     ============================================================ */
+  function renderDocumentos(presetPatientId) {
+    const root = document.getElementById("view-root");
+    const patients = PatientService.list();
+    const docs = DocumentService.list()
+      .filter(function (d) { return !presetPatientId || d.patientId === presetPatientId; })
+      .sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+
+    const rows = docs.length === 0
+      ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState("Sin documentos registrados", "Los documentos generados durante una consulta aparecerán aquí.") + '</td></tr>'
+      : docs.map(function (d) {
+          return (
+            '<tr style="cursor:pointer;" data-open="' + d.id + '">' +
+              '<td><span class="badge badge-accent">' + docTypeLabel(d.type) + '</span></td>' +
+              '<td>' + d.patientName + '</td>' +
+              '<td class="mono">' + d.fecha + '</td>' +
+              '<td>' + d.autor + '</td>' +
+              '<td style="text-align:right;"><button class="btn btn-ghost btn-sm">Ver documento →</button></td>' +
+            '</tr>'
+          );
+        }).join("");
+
+    root.innerHTML =
+      viewHeader("documentos") +
+      (presetPatientId ? '<button class="btn btn-ghost btn-sm" id="doc-clear-filter" style="padding-left:0;margin-bottom:10px;">← Ver documentos de todos los pacientes</button>' : '') +
+      '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;">' +
+        '<button class="btn btn-primary" id="btn-new-doc">Nuevo documento</button>' +
+      '</div>' +
+      UI.sectionBlock("Documentos generados", '<span class="badge badge-neutral">' + docs.length + '</span>',
+        '<table class="table"><thead><tr><th>Tipo</th><th>Paciente</th><th>Fecha</th><th>Generado por</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
+
+    const clearBtn = document.getElementById("doc-clear-filter");
+    if (clearBtn) clearBtn.addEventListener("click", function () { AppState.docFilterPatient = null; renderDocumentos(null); });
+    document.getElementById("btn-new-doc").addEventListener("click", function () { openNewDocumentModal(presetPatientId); });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-open]"), function (row) {
+      row.addEventListener("click", function () { openDocumentViewer(row.getAttribute("data-open")); });
+    });
+  }
+
+  function openNewDocumentModal(presetPatientId) {
+    const patients = PatientService.list();
+    if (patients.length === 0) { Toast.show("Registra al menos un paciente antes de generar un documento.", "danger"); return; }
+    Modal.open({
+      title: "Nuevo documento",
+      body:
+        '<div class="form-field"><label>Paciente</label><select id="nd-patient">' +
+          patients.map(function (p) { return '<option value="' + p.id + '"' + (presetPatientId === p.id ? ' selected' : '') + '>' + p.nombre + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Tipo de documento</label><select id="nd-tipo">' +
+          DOCUMENT_TYPES.map(function (t) { return '<option value="' + t.id + '">' + t.label + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Contenido</label><textarea id="nd-contenido" rows="5" placeholder="Detalle del documento"></textarea></div>' +
+        '<div class="form-field__hint">El documento requiere la firma del profesional responsable para tener validez.</div>',
+      foot:
+        '<button class="btn btn-secondary" id="nd-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="nd-save">Generar documento</button>'
+    });
+    document.getElementById("nd-cancel").addEventListener("click", Modal.close);
+    document.getElementById("nd-save").addEventListener("click", function () {
+      const patientId = document.getElementById("nd-patient").value;
+      const tipo = document.getElementById("nd-tipo").value;
+      const contenido = document.getElementById("nd-contenido").value.trim();
+      if (!contenido) { Toast.show("Escribe el contenido del documento.", "danger"); return; }
+      const patient = PatientService.get(patientId);
+      const doc = {
+        id: DocumentService.nextId(), patientId: patientId, patientName: patient.nombre,
+        type: tipo, contenido: contenido, fecha: new Date().toISOString().slice(0, 10),
+        autor: AppState.currentUser ? AppState.currentUser.label : "Sistema"
+      };
+      DocumentService.create(doc);
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: patientId, type: "documento",
+        title: docTypeLabel(tipo) + " generado", description: "Documento asociado al paciente.",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Modal.close();
+      Toast.show("Documento generado.", "success");
+      renderDocumentos(presetPatientId || null);
+    });
+  }
+
+  function openDocumentViewer(id) {
+    const d = DocumentService.list().filter(function (x) { return x.id === id; })[0];
+    if (!d) return;
+    Modal.open({
+      title: docTypeLabel(d.type),
+      body:
+        '<div id="doc-print-area" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:18px;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+            '<div style="font-family:var(--font-head);font-weight:700;font-size:14px;">Nexus Clinical</div>' +
+            '<span class="badge badge-warning">SIN FIRMA</span>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:10px;">' + d.fecha + ' · ' + d.autor + '</div>' +
+          '<div style="font-weight:700;margin-bottom:4px;">' + docTypeLabel(d.type) + '</div>' +
+          '<div style="font-size:12.5px;color:var(--color-text-muted);margin-bottom:12px;">Paciente: ' + d.patientName + '</div>' +
+          '<p style="font-size:13px;line-height:1.6;white-space:pre-wrap;">' + d.contenido + '</p>' +
+          '<div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--color-border);font-size:11px;color:var(--color-danger);text-align:center;">' +
+            'REQUIERE FIRMA DEL PROFESIONAL PARA VALIDEZ OFICIAL' +
+          '</div>' +
+        '</div>',
+      foot:
+        '<button class="btn btn-secondary" id="doc-close">Cerrar</button>' +
+        '<button class="btn btn-primary" id="doc-print">Imprimir / Descargar</button>'
+    });
+    document.getElementById("doc-close").addEventListener("click", Modal.close);
+    document.getElementById("doc-print").addEventListener("click", function () {
+      const content = document.getElementById("doc-print-area").outerHTML;
+      const win = window.open("", "_blank");
+      win.document.write('<html><head><title>' + docTypeLabel(d.type) + '</title><style>body{font-family:sans-serif;padding:24px;} .badge{border-radius:999px;padding:3px 8px;font-size:11px;} .badge-warning{background:#FEF3C7;color:#92400E;}</style></head><body>' + content + '</body></html>');
+      win.document.close();
+      win.print();
+    });
+  }
+
+  /* ============================================================
+     VISTA: ANALÍTICA
+     ============================================================ */
+  function barBreakdown(title, entries, colorVar) {
+    const total = entries.reduce(function (s, e) { return s + e.value; }, 0);
+    if (total === 0) {
+      return UI.sectionBlock(title, '', UI.emptyState("Sin datos suficientes", "Este desglose se completará a medida que haya más actividad registrada."));
+    }
+    const rows = entries.map(function (e) {
+      const pct = Math.round((e.value / total) * 100);
+      return (
+        '<div style="margin-bottom:12px;">' +
+          '<div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;">' +
+            '<span>' + e.label + '</span><span class="mono" style="color:var(--color-text-muted);">' + e.value + ' · ' + pct + '%</span>' +
+          '</div>' +
+          '<div style="height:7px;border-radius:4px;background:var(--color-surface-muted);overflow:hidden;">' +
+            '<div style="height:100%;width:' + pct + '%;border-radius:4px;background:' + (colorVar || "var(--color-primary)") + ';transition:width 400ms ease;"></div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+    return UI.sectionBlock(title, '<span class="badge badge-neutral">' + total + ' total</span>', '<div style="padding:16px 20px;">' + rows + '</div>');
+  }
+
+  function renderAnalitica() {
+    const root = document.getElementById("view-root");
+    const patients = PatientService.list();
+    const appts = AppointmentService.list();
+    const consultas = ConsultaService.list();
+    const docs = DocumentService.list();
+
+    const patientsByStatus = PATIENT_STATUSES.map(function (s) {
+      return { label: s, value: patients.filter(function (p) { return p.estado === s; }).length };
+    });
+    const apptsByStatus = APPOINTMENT_STATUSES.map(function (s) {
+      return { label: s, value: appts.filter(function (a) { return a.estado === s; }).length };
+    });
+    const docsByType = DOCUMENT_TYPES.map(function (t) {
+      return { label: t.label, value: docs.filter(function (d) { return d.type === t.id; }).length };
+    });
+    const completedConsultas = consultas.filter(function (c) { return c.estado === "Completada"; }).length;
+
+    root.innerHTML =
+      viewHeader("analitica") +
+      '<div class="metric-grid">' +
+        UI.metricCard("Pacientes registrados", patients.length || null, Icons.patients) +
+        UI.metricCard("Citas totales", appts.length || null, Icons.agenda) +
+        UI.metricCard("Consultas completadas", completedConsultas || null, Icons.consult) +
+        UI.metricCard("Documentos generados", docs.length || null, Icons.docs) +
+      '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" class="p360-grid">' +
+        '<div>' + barBreakdown("Pacientes por estado", patientsByStatus, "var(--color-primary)") + '</div>' +
+        '<div>' + barBreakdown("Citas por estado", apptsByStatus, "var(--color-accent)") + '</div>' +
+      '</div>' +
+      barBreakdown("Documentos por tipo", docsByType, "var(--color-primary)");
   }
 
   function renderModuleStub(viewId) {
@@ -2288,7 +2524,7 @@ textarea:focus-visible,
         meta.title,
         '<span class="badge badge-accent">Próximo sprint</span>',
         UI.emptyState(
-          "Módulo en construcción",
+          "Próximamente",
           "El módulo de " + meta.title.toLowerCase() + " se habilita en un sprint posterior del roadmap. La navegación y la estructura visual ya están listas para recibirlo."
         )
       );
@@ -2301,22 +2537,22 @@ textarea:focus-visible,
       viewHeader("configuracion") +
       '<div class="card" style="margin-bottom:20px;">' +
         '<div class="card-title">Rol activo</div>' +
-        '<div class="card-sub" style="margin-bottom:16px;">Determina qué módulos y acciones se muestran en esta sesión de demostración.</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Determina qué módulos y acciones están disponibles en esta sesión.</div>' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">' +
           '<div style="display:flex;align-items:center;gap:12px;">' +
             '<div class="user-chip__avatar" style="width:38px;height:38px;font-size:14px;">' + role.initials + '</div>' +
-            '<div><div style="font-weight:700;font-size:14.5px;">' + role.label + '</div><div class="mono" style="font-size:11px;color:var(--color-text-muted);">rol de demostración</div></div>' +
+            '<div><div style="font-weight:700;font-size:14.5px;">' + role.label + '</div><div class="mono" style="font-size:11px;color:var(--color-text-muted);">rol activo</div></div>' +
           '</div>' +
           '<button class="btn btn-secondary" id="cfg-switch-role">Cambiar rol</button>' +
         '</div>' +
       '</div>' +
       '<div class="card" style="margin-bottom:20px;">' +
         '<div class="card-title">Entorno</div>' +
-        '<div class="card-sub">Prototipo funcional con datos sintéticos. Sin autenticación, cifrado ni conexión institucional real en esta fase.</div>' +
+        '<div class="card-sub">La seguridad avanzada, autenticación e integración institucional se habilitan en la fase de despliegue.</div>' +
       '</div>' +
       '<div class="card">' +
         '<div class="card-title" style="color:var(--color-danger);">Reiniciar datos del prototipo</div>' +
-        '<div class="card-sub" style="margin-bottom:14px;">Elimina toda la información almacenada localmente en este navegador y reinicia el entorno de demostración.</div>' +
+        '<div class="card-sub" style="margin-bottom:14px;">Elimina toda la información almacenada localmente en este navegador.</div>' +
         '<button class="btn btn-danger btn-sm" id="cfg-clear-data">Borrar datos locales</button>' +
       '</div>';
 
@@ -2326,7 +2562,7 @@ textarea:focus-visible,
     document.getElementById("cfg-clear-data").addEventListener("click", function () {
       Modal.open({
         title: "Confirmar reinicio",
-        body: '<p style="font-size:13.5px;color:var(--color-text-muted);">Esta acción elimina todos los datos sintéticos almacenados localmente. No puede deshacerse. ¿Deseas continuar?</p>',
+        body: '<p style="font-size:13.5px;color:var(--color-text-muted);">Esta acción elimina todos los datos almacenados localmente. No puede deshacerse. ¿Deseas continuar?</p>',
         foot:
           '<button class="btn btn-secondary" id="cancel-clear">Cancelar</button>' +
           '<button class="btn btn-danger" id="confirm-clear">Borrar datos</button>'
@@ -2352,6 +2588,8 @@ textarea:focus-visible,
     if (viewId === "preconsulta") { resetPrecheckDraft(null); return renderPreconsulta(); }
     if (viewId === "consultas") return renderConsultas();
     if (viewId === "medicamentos") return renderMedicamentos();
+    if (viewId === "documentos") return renderDocumentos(AppState.docFilterPatient || null);
+    if (viewId === "analitica") return renderAnalitica();
     return renderModuleStub(viewId);
   }
 
