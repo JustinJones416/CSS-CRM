@@ -118,6 +118,15 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .hero p.lead { font-size: 17px; color: var(--color-text-muted); max-width: 540px; margin: 0 auto 32px; }
 .hero__actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 @media (max-width: 640px) { .hero h1 { font-size: 30px; } }
+@media (max-width: 700px) {
+  .pub-topbar__inner { padding: 12px 16px; flex-wrap: nowrap; }
+  .pub-nav-cta { gap: 6px; }
+  .pub-nav-cta .btn-ghost { display: none; }
+  .pub-brand__name { font-size: 14px; }
+  .wrap, .hero, .steps, .access-section { padding-left: 16px; padding-right: 16px; }
+  .access-card { padding: 26px 22px; }
+  .portal-topbar__inner { padding: 0 2px; }
+}
 
 /* ---- Cómo funciona ---- */
 .steps { padding: 40px 24px 80px; }
@@ -304,7 +313,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         <div class="pub-brand__mark">CN</div>
         <div class="pub-brand__name">Nexus Contigo</div>
       </div>
-      <button class="btn btn-ghost" id="btn-logout">Cerrar sesión</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="btn btn-ghost" id="btn-back-home">← Inicio</button>
+        <button class="btn btn-ghost" id="btn-logout">Cerrar sesión</button>
+      </div>
     </div>
   </header>
   <main class="portal-main" id="portal-main"></main>
@@ -356,22 +368,58 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     }).join("");
   }
 
-  document.getElementById("btn-login").addEventListener("click", function () {
-    const id = document.getElementById("login-patient").value;
-    const patients = StorageService.get("patients", []);
-    currentPatient = patients.filter(function (p) { return p.id === id; })[0];
-    if (!currentPatient) return;
+  function enterPortal(patient) {
+    currentPatient = patient;
     document.getElementById("public-site").style.display = "none";
     document.getElementById("portal-shell").classList.add("active");
     renderPortal();
     window.scrollTo({ top: 0 });
-  });
+  }
 
-  document.getElementById("btn-logout").addEventListener("click", function () {
+  function exitPortal() {
     currentPatient = null;
     document.getElementById("portal-shell").classList.remove("active");
     document.getElementById("public-site").style.display = "block";
     window.scrollTo({ top: 0 });
+  }
+
+  document.getElementById("btn-login").addEventListener("click", function () {
+    const id = document.getElementById("login-patient").value;
+    const patients = StorageService.get("patients", []);
+    const patient = patients.filter(function (p) { return p.id === id; })[0];
+    if (!patient) return;
+    sessionStorage.setItem("nexus_contigo_patient", id);
+    window.location.hash = "portal";
+    enterPortal(patient);
+  });
+
+  document.getElementById("btn-logout").addEventListener("click", function () {
+    sessionStorage.removeItem("nexus_contigo_patient");
+    if (window.location.hash === "#portal") {
+      window.history.back();
+    } else {
+      exitPortal();
+    }
+  });
+  document.getElementById("btn-back-home").addEventListener("click", function () {
+    if (window.location.hash === "#portal") {
+      window.history.back();
+    } else {
+      exitPortal();
+    }
+  });
+
+  /* Soporte de botón atrás/adelante del navegador: entrar al portal
+     agrega la entrada #portal al historial; salir de esa entrada
+     (por login o por "atrás") debe regresar siempre al sitio público. */
+  window.addEventListener("popstate", function () {
+    if (window.location.hash === "#portal") {
+      const savedId = sessionStorage.getItem("nexus_contigo_patient");
+      const patients = StorageService.get("patients", []);
+      const patient = patients.filter(function (p) { return p.id === savedId; })[0];
+      if (patient) { enterPortal(patient); return; }
+    }
+    exitPortal();
   });
 
   function statusBadge(estado) {
@@ -515,7 +563,16 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     if (e.target.id === "modal-overlay") e.target.classList.remove("active");
   });
 
-  document.addEventListener("DOMContentLoaded", initLoginSelect);
+  document.addEventListener("DOMContentLoaded", function () {
+    initLoginSelect();
+    if (window.location.hash === "#portal") {
+      const savedId = sessionStorage.getItem("nexus_contigo_patient");
+      const patients = StorageService.get("patients", []);
+      const patient = patients.filter(function (p) { return p.id === savedId; })[0];
+      if (patient) enterPortal(patient);
+      else window.location.hash = "";
+    }
+  });
 })();
 </script>
 </body>

@@ -668,10 +668,12 @@ textarea:focus-visible,
 @media (max-width: 900px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.is-open { transform: translateX(0); }
-  .topbar { left: 0; }
+  .topbar { left: 0; padding: 0 14px; }
   .main-content { margin-left: 0; }
-  .topbar__search { max-width: 220px; }
+  .topbar__search { max-width: 160px; }
   .menu-toggle { display: flex !important; }
+  .topbar-portal-link span.portal-link__label { display: none; }
+  .topbar-portal-link { padding: 9px 10px; }
 }
 
 @media (max-width: 640px) {
@@ -682,6 +684,7 @@ textarea:focus-visible,
   .table { display: block; overflow-x: auto; white-space: nowrap; }
   .user-chip__meta { display: none; }
   .demo-pill span.demo-pill__text { display: none; }
+  .topbar__search { display: none; }
 }
 
 .menu-toggle {
@@ -762,8 +765,8 @@ textarea:focus-visible,
     </div>
 
     <div class="topbar__right">
-      <a href="portal-paciente.html" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" style="text-decoration:none;">
-        Ver Nexus Contigo ↗
+      <a href="portal-paciente.html" target="_blank" rel="noopener" class="btn btn-secondary btn-sm topbar-portal-link" style="text-decoration:none;">
+        <span class="portal-link__label">Ver Nexus Contigo</span> ↗
       </a>
       <div class="user-chip">
         <div class="user-chip__avatar" id="user-avatar">--</div>
@@ -1361,6 +1364,32 @@ textarea:focus-visible,
     document.getElementById("view-root").scrollTop = 0;
     window.scrollTo({ top: 0, behavior: "auto" });
   }
+
+  /* Sincroniza la vista con el botón atrás/adelante del navegador.
+     navigateTo() y navigateToPatient() ya escriben en window.location.hash,
+     lo que el navegador registra automáticamente en su historial; este
+     listener solo se encarga de volver a pintar la vista correcta cuando
+     el usuario navega con los botones del navegador, sin volver a
+     empujar una nueva entrada al historial. */
+  function handleBrowserNavigation() {
+    if (!document.getElementById("app-shell").classList.contains("active")) return;
+    const raw = window.location.hash.replace("#", "");
+    if (raw.indexOf("pacientes/") === 0) {
+      const id = raw.split("/")[1];
+      AppState.currentView = "pacientes";
+      AppState.selectedPatient = id;
+      renderSidebarNav();
+      renderPatient360(id);
+    } else {
+      const viewId = VIEW_META[raw] ? raw : "dashboard";
+      AppState.currentView = viewId;
+      if (viewId !== "pacientes") AppState.selectedPatient = null;
+      renderSidebarNav();
+      renderView(viewId);
+    }
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+  window.addEventListener("popstate", handleBrowserNavigation);
 
   function renderSidebarNav() {
     const nav = document.getElementById("sidebar-nav");
