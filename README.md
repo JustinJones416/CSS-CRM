@@ -4,10 +4,6 @@ CRM sanitario conceptual para la Caja de Seguro Social de Panamá (CSS). Prototi
 
 **Entorno de demostración.** Todos los datos son sintéticos y están claramente etiquetados como tal. El prototipo no representa información institucional, médica ni de inventario real de la CSS, y no implementa autenticación, cifrado ni RBAC real en esta fase.
 
-## Descripción corta (para el campo "About" de GitHub)
-
-CRM sanitario conceptual para la CSS de Panamá. Prototipo SPA en un solo archivo HTML, con gestión de pacientes, agenda de citas y timeline clínico, sobre datos sintéticos de demostración.
-
 ## Estado del proyecto
 
 En desarrollo iterativo por sprints. Completados hasta ahora:
