@@ -927,6 +927,58 @@ textarea:focus-visible,
   };
 
   /* ============================================================
+     APPOINTMENT SERVICE — Agenda CRM
+     ============================================================ */
+  const APPOINTMENT_STATUSES = ["Programada", "Confirmada", "En consulta", "Completada", "Cancelada", "No asistió"];
+
+  const SYNTHETIC_DOCTORS = [
+    { id: "MED-01", nombre: "Dr. Torres (demo)", especialidad: "Medicina general" },
+    { id: "MED-02", nombre: "Dra. Núñez (demo)", especialidad: "Endocrinología" },
+    { id: "MED-03", nombre: "Dr. Espino (demo)", especialidad: "Cardiología" },
+    { id: "MED-04", nombre: "Dra. Bethancourt (demo)", especialidad: "Pediatría" }
+  ];
+
+  function seedAppointmentData() {
+    StorageService.seed("doctors", SYNTHETIC_DOCTORS);
+    StorageService.seed("appointments", [
+      { id: "CITA-0001", patientId: "PAC-0001", patientName: "Marta Solís (demo)", doctorId: "MED-01", doctorName: "Dr. Torres (demo)", especialidad: "Medicina general", modalidad: "Presencial", fecha: "2026-08-18", hora: "09:00", estado: "Confirmada" },
+      { id: "CITA-0002", patientId: "PAC-0002", patientName: "Julio Herrera (demo)", doctorId: "MED-02", doctorName: "Dra. Núñez (demo)", especialidad: "Endocrinología", modalidad: "Virtual", fecha: "2026-08-20", hora: "11:30", estado: "Programada" }
+    ]);
+  }
+
+  const AppointmentService = {
+    list: function () { return StorageService.get("appointments", []); },
+    doctors: function () { return StorageService.get("doctors", []); },
+    nextId: function () {
+      const n = AppointmentService.list().length + 1;
+      return "CITA-" + String(n).padStart(4, "0");
+    },
+    create: function (appt) {
+      return StorageService.update("appointments", function (list) {
+        list = list || [];
+        list.push(appt);
+        return list;
+      }, []);
+    },
+    updateStatus: function (id, estado) {
+      return StorageService.update("appointments", function (list) {
+        return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, { estado: estado }) : a; });
+      }, []);
+    },
+    reschedule: function (id, fecha, hora) {
+      return StorageService.update("appointments", function (list) {
+        return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, { fecha: fecha, hora: hora, estado: "Confirmada" }) : a; });
+      }, []);
+    },
+    upcomingCount: function () {
+      const today = new Date().toISOString().slice(0, 10);
+      return AppointmentService.list().filter(function (a) {
+        return a.fecha >= today && a.estado !== "Cancelada" && a.estado !== "Completada" && a.estado !== "No asistió";
+      }).length;
+    }
+  };
+
+  /* ============================================================
      ROLES DE DEMOSTRACIÓN
      ============================================================ */
   const ROLES = [
@@ -1164,7 +1216,7 @@ textarea:focus-visible,
       viewHeader("dashboard") +
       '<div class="metric-grid">' +
         UI.metricCard("Pacientes pendientes", null, Icons.patients) +
-        UI.metricCard("Próximas citas", null, Icons.agenda) +
+        UI.metricCard("Próximas citas", AppointmentService.upcomingCount() || null, Icons.agenda) +
         UI.metricCard("Preconsultas pendientes", null, Icons.precheck) +
         UI.metricCard("Seguimientos activos", null, Icons.followup) +
       '</div>' +
@@ -1314,7 +1366,7 @@ textarea:focus-visible,
 
     const acciones = [
       { label: "Nueva preconsulta", handler: function () { pendingActionToast("La preconsulta"); } },
-      { label: "Agendar cita", handler: function () { pendingActionToast("La agenda de citas"); } },
+      { label: "Agendar cita", handler: function () { openNewAppointmentModal(p.id); } },
       { label: "Iniciar videoconsulta", handler: function () { pendingActionToast("La videoconsulta de demostración"); } },
       { label: "Ver documentos", handler: function () { pendingActionToast("El panel de documentos"); } },
       { label: "Ver medicamentos", handler: function () { pendingActionToast("PharmaSync"); } },
@@ -1424,6 +1476,180 @@ textarea:focus-visible,
     });
   }
 
+  /* ============================================================
+     VISTA: AGENDA CRM
+     ============================================================ */
+  function apptBadgeClass(estado) {
+    if (estado === "Completada") return "badge-success";
+    if (estado === "Confirmada" || estado === "En consulta") return "badge-accent";
+    if (estado === "Cancelada" || estado === "No asistió") return "badge-danger";
+    return "badge-neutral";
+  }
+
+  function renderAgenda(filterEstado) {
+    const root = document.getElementById("view-root");
+    const all = AppointmentService.list().sort(function (a, b) {
+      return (a.fecha + a.hora) < (b.fecha + b.hora) ? -1 : 1;
+    });
+    const filtered = filterEstado ? all.filter(function (a) { return a.estado === filterEstado; }) : all;
+
+    const filterOptions = '<option value="">Todos los estados</option>' +
+      APPOINTMENT_STATUSES.map(function (s) {
+        return '<option value="' + s + '"' + (filterEstado === s ? ' selected' : '') + '>' + s + '</option>';
+      }).join("");
+
+    const rows = filtered.length === 0
+      ? '<tr><td colspan="6" style="padding:0;">' + UI.emptyState(
+          all.length === 0 ? "Sin citas registradas" : "Sin coincidencias",
+          all.length === 0 ? "Crea la primera cita de demostración para comenzar a probar la agenda." : "Ningún resultado coincide con el filtro seleccionado."
+        ) + '</td></tr>'
+      : filtered.map(function (a) {
+          return (
+            '<tr>' +
+              '<td><div style="font-weight:600;">' + a.patientName + '</div><div class="mono" style="font-size:11px;color:var(--color-text-muted);">' + a.id + '</div></td>' +
+              '<td>' + a.doctorName + '<div style="font-size:11.5px;color:var(--color-text-muted);">' + a.especialidad + '</div></td>' +
+              '<td><span class="badge badge-neutral">' + a.modalidad + '</span></td>' +
+              '<td class="mono">' + a.fecha + ' · ' + a.hora + '</td>' +
+              '<td><span class="badge ' + apptBadgeClass(a.estado) + '">' + a.estado + '</span></td>' +
+              '<td style="text-align:right;white-space:nowrap;">' +
+                (a.estado !== "Cancelada" && a.estado !== "Completada"
+                  ? '<button class="btn btn-ghost btn-sm" data-reschedule="' + a.id + '">Reprogramar</button>' +
+                    '<button class="btn btn-ghost btn-sm" data-cancel="' + a.id + '" style="color:var(--color-danger);">Cancelar</button>'
+                  : '<span style="color:var(--color-text-faint);font-size:12px;">Sin acciones</span>') +
+              '</td>' +
+            '</tr>'
+          );
+        }).join("");
+
+    root.innerHTML =
+      viewHeader("agenda") +
+      '<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;">' +
+        '<select id="agenda-filter" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:9px 12px;font-size:13px;background:var(--color-surface);color:var(--color-text);">' + filterOptions + '</select>' +
+        '<button class="btn btn-primary" id="btn-new-appt">Nueva cita</button>' +
+      '</div>' +
+      UI.sectionBlock(
+        "Citas programadas",
+        '<span class="badge badge-neutral">' + filtered.length + ' de ' + all.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Modalidad</th><th>Fecha y hora</th><th>Estado</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+      );
+
+    document.getElementById("agenda-filter").addEventListener("change", function (e) {
+      renderAgenda(e.target.value);
+    });
+    document.getElementById("btn-new-appt").addEventListener("click", function () { openNewAppointmentModal(null, filterEstado); });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-cancel]"), function (btn) {
+      btn.addEventListener("click", function () { confirmCancelAppointment(btn.getAttribute("data-cancel"), filterEstado); });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-reschedule]"), function (btn) {
+      btn.addEventListener("click", function () { openRescheduleModal(btn.getAttribute("data-reschedule"), filterEstado); });
+    });
+  }
+
+  function openNewAppointmentModal(presetPatientId, filterEstado) {
+    const patients = PatientService.list();
+    const doctors = AppointmentService.doctors();
+    if (patients.length === 0) {
+      Toast.show("Registra al menos un paciente antes de crear una cita.", "danger");
+      return;
+    }
+    Modal.open({
+      title: "Nueva cita",
+      body:
+        '<div class="form-field"><label>Paciente</label><select id="ap-patient">' +
+          patients.map(function (p) { return '<option value="' + p.id + '"' + (presetPatientId === p.id ? ' selected' : '') + '>' + p.nombre + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Médico</label><select id="ap-doctor">' +
+          doctors.map(function (d) { return '<option value="' + d.id + '" data-esp="' + d.especialidad + '">' + d.nombre + ' — ' + d.especialidad + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Modalidad</label><select id="ap-modalidad"><option>Presencial</option><option>Virtual</option></select></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+          '<div class="form-field"><label>Fecha</label><input type="date" id="ap-fecha"></div>' +
+          '<div class="form-field"><label>Hora</label><input type="time" id="ap-hora"></div>' +
+        '</div>',
+      foot:
+        '<button class="btn btn-secondary" id="ap-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="ap-save">Crear cita</button>'
+    });
+    document.getElementById("ap-cancel").addEventListener("click", Modal.close);
+    document.getElementById("ap-save").addEventListener("click", function () {
+      const patientId = document.getElementById("ap-patient").value;
+      const doctorSelect = document.getElementById("ap-doctor");
+      const doctorId = doctorSelect.value;
+      const especialidad = doctorSelect.selectedOptions[0].getAttribute("data-esp");
+      const modalidad = document.getElementById("ap-modalidad").value;
+      const fecha = document.getElementById("ap-fecha").value;
+      const hora = document.getElementById("ap-hora").value;
+      if (!fecha || !hora) { Toast.show("Selecciona fecha y hora para la cita.", "danger"); return; }
+      const patient = PatientService.get(patientId);
+      const doctor = doctors.filter(function (d) { return d.id === doctorId; })[0];
+      const appt = {
+        id: AppointmentService.nextId(), patientId: patientId, patientName: patient.nombre,
+        doctorId: doctorId, doctorName: doctor.nombre, especialidad: especialidad,
+        modalidad: modalidad, fecha: fecha, hora: hora, estado: "Programada"
+      };
+      AppointmentService.create(appt);
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: patientId, type: "cita",
+        title: "Cita creada", description: especialidad + " · " + modalidad + " · " + fecha + " " + hora + " (demo).",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Modal.close();
+      Toast.show("Cita creada correctamente.", "success");
+      if (AppState.currentView === "pacientes" && AppState.selectedPatient) renderPatient360(AppState.selectedPatient);
+      else renderAgenda(filterEstado);
+    });
+  }
+
+  function confirmCancelAppointment(id, filterEstado) {
+    Modal.open({
+      title: "Cancelar cita",
+      body: '<p style="font-size:13.5px;color:var(--color-text-muted);">Esta acción marcará la cita como cancelada. ¿Deseas continuar?</p>',
+      foot:
+        '<button class="btn btn-secondary" id="cc-no">Volver</button>' +
+        '<button class="btn btn-danger" id="cc-yes">Cancelar cita</button>'
+    });
+    document.getElementById("cc-no").addEventListener("click", Modal.close);
+    document.getElementById("cc-yes").addEventListener("click", function () {
+      AppointmentService.updateStatus(id, "Cancelada");
+      Modal.close();
+      Toast.show("Cita cancelada.", "success");
+      renderAgenda(filterEstado);
+    });
+  }
+
+  function openRescheduleModal(id, filterEstado) {
+    const appt = AppointmentService.list().filter(function (a) { return a.id === id; })[0];
+    if (!appt) return;
+    Modal.open({
+      title: "Reprogramar cita",
+      body:
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+          '<div class="form-field"><label>Nueva fecha</label><input type="date" id="rs-fecha" value="' + appt.fecha + '"></div>' +
+          '<div class="form-field"><label>Nueva hora</label><input type="time" id="rs-hora" value="' + appt.hora + '"></div>' +
+        '</div>',
+      foot:
+        '<button class="btn btn-secondary" id="rs-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="rs-save">Guardar cambios</button>'
+    });
+    document.getElementById("rs-cancel").addEventListener("click", Modal.close);
+    document.getElementById("rs-save").addEventListener("click", function () {
+      const fecha = document.getElementById("rs-fecha").value;
+      const hora = document.getElementById("rs-hora").value;
+      if (!fecha || !hora) { Toast.show("Selecciona fecha y hora.", "danger"); return; }
+      AppointmentService.reschedule(id, fecha, hora);
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: appt.patientId, type: "cita",
+        title: "Cita reprogramada", description: "Nueva fecha: " + fecha + " " + hora + " (demo).",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Modal.close();
+      Toast.show("Cita reprogramada.", "success");
+      renderAgenda(filterEstado);
+    });
+  }
+
   function renderModuleStub(viewId) {
     const root = document.getElementById("view-root");
     const meta = VIEW_META[viewId];
@@ -1493,6 +1719,7 @@ textarea:focus-visible,
       if (AppState.selectedPatient) return renderPatient360(AppState.selectedPatient);
       return renderPacientes();
     }
+    if (viewId === "agenda") return renderAgenda();
     return renderModuleStub(viewId);
   }
 
@@ -1508,6 +1735,7 @@ textarea:focus-visible,
      ============================================================ */
   function init() {
     seedPatientData();
+    seedAppointmentData();
     renderRoleGate();
 
     const savedSession = StorageService.get("session_role", null);
