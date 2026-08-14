@@ -556,6 +556,8 @@ textarea:focus-visible,
 }
 .toast-success { background: var(--color-success); }
 .toast-danger { background: var(--color-danger); }
+.toast-accent { background: var(--color-accent); }
+@media (max-width: 900px) { .p360-grid { grid-template-columns: 1fr !important; } }
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -850,6 +852,81 @@ textarea:focus-visible,
   };
 
   /* ============================================================
+     PATIENT SERVICE
+     Capa de negocio para pacientes y timeline. Toda lectura o
+     escritura pasa por StorageService, nunca accede a localStorage
+     directamente.
+     ============================================================ */
+  const PATIENT_STATUSES = ["Activo", "En seguimiento", "Inactivo"];
+
+  const SYNTHETIC_PATIENTS = [
+    {
+      id: "PAC-0001", nombre: "Marta Solís (demo)", identificacion: "8-DEMO-0001", edad: 34,
+      telefono: "6000-0001 (demo)", correo: "marta.demo@correo-demo.com", estado: "Activo",
+      alergias: ["Penicilina (declarada)"], medicamentos: ["Losartán 50 mg (declarado)"],
+      antecedentes: ["Hipertensión (declarado)"], condiciones: ["Ninguna registrada"],
+      proximaAtencion: { fecha: "2026-08-18", medico: "Dr. Torres (demo)", modalidad: "Presencial", especialidad: "Medicina general", estado: "Confirmada" }
+    },
+    {
+      id: "PAC-0002", nombre: "Julio Herrera (demo)", identificacion: "8-DEMO-0002", edad: 58,
+      telefono: "6000-0002 (demo)", correo: "julio.demo@correo-demo.com", estado: "En seguimiento",
+      alergias: ["Ninguna declarada"], medicamentos: ["Metformina 850 mg (declarado)"],
+      antecedentes: ["Diabetes tipo 2 (declarado)"], condiciones: ["Control metabólico (declarado)"],
+      proximaAtencion: { fecha: "2026-08-20", medico: "Dra. Núñez (demo)", modalidad: "Virtual", especialidad: "Endocrinología", estado: "Programada" }
+    },
+    {
+      id: "PAC-0003", nombre: "Ana Ríos (demo)", identificacion: "8-DEMO-0003", edad: 27,
+      telefono: "6000-0003 (demo)", correo: "ana.demo@correo-demo.com", estado: "Activo",
+      alergias: ["Sulfas (declarada)"], medicamentos: ["Ninguno registrado"],
+      antecedentes: ["Ninguno registrado"], condiciones: ["Ninguna registrada"],
+      proximaAtencion: null
+    }
+  ];
+
+  function seedPatientData() {
+    StorageService.seed("patients", SYNTHETIC_PATIENTS);
+    StorageService.seed("timeline", [
+      { id: "TL-0001", patientId: "PAC-0001", type: "preconsulta", title: "Preconsulta registrada", description: "Motivo: control de presión arterial (demo).", date: "2026-08-13", actor: "Recepción (demo)", metadata: {} },
+      { id: "TL-0002", patientId: "PAC-0001", type: "cita", title: "Cita creada", description: "Medicina general, modalidad presencial (demo).", date: "2026-08-13", actor: "Recepción (demo)", metadata: {} },
+      { id: "TL-0003", patientId: "PAC-0002", type: "seguimiento", title: "Seguimiento registrado", description: "Control de valores de glucosa (demo).", date: "2026-08-10", actor: "Dra. Núñez (demo)", metadata: {} }
+    ]);
+  }
+
+  const PatientService = {
+    list: function () { return StorageService.get("patients", []); },
+    get: function (id) {
+      return PatientService.list().filter(function (p) { return p.id === id; })[0] || null;
+    },
+    create: function (patient) {
+      return StorageService.update("patients", function (list) {
+        list = list || [];
+        list.push(patient);
+        return list;
+      }, []);
+    },
+    nextId: function () {
+      const list = PatientService.list();
+      const n = list.length + 1;
+      return "PAC-" + String(n).padStart(4, "0");
+    }
+  };
+
+  const TimelineService = {
+    listByPatient: function (patientId) {
+      return StorageService.get("timeline", [])
+        .filter(function (t) { return t.patientId === patientId; })
+        .sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    },
+    add: function (entry) {
+      return StorageService.update("timeline", function (list) {
+        list = list || [];
+        list.push(entry);
+        return list;
+      }, []);
+    }
+  };
+
+  /* ============================================================
      ROLES DE DEMOSTRACIÓN
      ============================================================ */
   const ROLES = [
@@ -1032,6 +1109,8 @@ textarea:focus-visible,
      ============================================================ */
   function navigateTo(viewId) {
     AppState.currentView = viewId;
+    if (viewId !== "pacientes") AppState.selectedPatient = null;
+    else AppState.selectedPatient = null;
     window.location.hash = viewId;
     renderSidebarNav();
     renderView(viewId);
@@ -1101,6 +1180,250 @@ textarea:focus-visible,
       );
   }
 
+  /* ============================================================
+     VISTA: PACIENTES — LISTADO
+     ============================================================ */
+  function statusBadgeClass(estado) {
+    if (estado === "Activo") return "badge-success";
+    if (estado === "En seguimiento") return "badge-warning";
+    return "badge-neutral";
+  }
+
+  function initialsOf(nombre) {
+    return nombre.split(" ").filter(Boolean).slice(0, 2).map(function (w) { return w[0]; }).join("").toUpperCase();
+  }
+
+  function renderPacientes(filterText) {
+    const root = document.getElementById("view-root");
+    const patients = PatientService.list();
+    const q = (filterText || "").trim().toLowerCase();
+    const filtered = q
+      ? patients.filter(function (p) {
+          return p.nombre.toLowerCase().indexOf(q) !== -1 ||
+                 p.identificacion.toLowerCase().indexOf(q) !== -1;
+        })
+      : patients;
+
+    const rows = filtered.length === 0
+      ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState(
+          patients.length === 0 ? "Sin pacientes registrados" : "Sin coincidencias",
+          patients.length === 0
+            ? "Registra el primer paciente de demostración para comenzar a probar el flujo del CRM."
+            : "Ningún paciente coincide con la búsqueda. Ajusta el término e intenta de nuevo."
+        ) + '</td></tr>'
+      : filtered.map(function (p) {
+          return (
+            '<tr class="patient-row" data-id="' + p.id + '" style="cursor:pointer;">' +
+              '<td><div style="display:flex;align-items:center;gap:10px;">' +
+                '<div class="user-chip__avatar" style="width:32px;height:32px;font-size:11px;">' + initialsOf(p.nombre) + '</div>' +
+                '<div><div style="font-weight:600;">' + p.nombre + '</div><div class="mono" style="font-size:11px;color:var(--color-text-muted);">' + p.identificacion + '</div></div>' +
+              '</div></td>' +
+              '<td class="mono">' + p.edad + ' años</td>' +
+              '<td><span class="badge ' + statusBadgeClass(p.estado) + '">' + p.estado + '</span></td>' +
+              '<td>' + (p.proximaAtencion ? p.proximaAtencion.fecha + ' · ' + p.proximaAtencion.especialidad : '<span style="color:var(--color-text-faint);">Sin próxima atención</span>') + '</td>' +
+              '<td style="text-align:right;"><button class="btn btn-ghost btn-sm" data-id="' + p.id + '">Ver ficha →</button></td>' +
+            '</tr>'
+          );
+        }).join("");
+
+    root.innerHTML =
+      viewHeader("pacientes") +
+      '<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;">' +
+        '<div style="display:flex;align-items:center;gap:8px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:8px 12px;max-width:320px;flex:1;">' +
+          '<svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="color:var(--color-text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+          '<input type="text" id="patient-search" placeholder="Buscar por nombre o identificación…" style="border:none;outline:none;font-size:13px;width:100%;" value="' + (filterText || "") + '">' +
+        '</div>' +
+        '<button class="btn btn-primary" id="btn-new-patient">Nuevo paciente</button>' +
+      '</div>' +
+      UI.sectionBlock(
+        "Listado de pacientes",
+        '<span class="badge badge-neutral">' + filtered.length + ' de ' + patients.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Edad</th><th>Estado</th><th>Próxima atención</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+      );
+
+    document.getElementById("patient-search").addEventListener("input", function (e) {
+      renderPacientes(e.target.value);
+    });
+    document.getElementById("btn-new-patient").addEventListener("click", openNewPatientModal);
+    Array.prototype.forEach.call(root.querySelectorAll("[data-id]"), function (el) {
+      el.addEventListener("click", function () {
+        navigateToPatient(el.getAttribute("data-id"));
+      });
+    });
+  }
+
+  function openNewPatientModal() {
+    Modal.open({
+      title: "Nuevo paciente de demostración",
+      body:
+        '<div class="form-field"><label>Nombre completo</label><input type="text" id="np-nombre" placeholder="Ej. Carlos Vega (demo)"></div>' +
+        '<div class="form-field"><label>Edad</label><input type="number" id="np-edad" min="0" max="120" placeholder="Ej. 41"></div>' +
+        '<div class="form-field"><label>Estado</label><select id="np-estado">' +
+          PATIENT_STATUSES.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field__hint">Todos los datos ingresados aquí son sintéticos y quedan claramente marcados como de demostración.</div>',
+      foot:
+        '<button class="btn btn-secondary" id="np-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="np-save">Guardar paciente</button>'
+    });
+    document.getElementById("np-cancel").addEventListener("click", Modal.close);
+    document.getElementById("np-save").addEventListener("click", function () {
+      const nombre = document.getElementById("np-nombre").value.trim();
+      const edad = parseInt(document.getElementById("np-edad").value, 10);
+      const estado = document.getElementById("np-estado").value;
+      if (!nombre || !edad) {
+        Toast.show("Completa nombre y edad para continuar.", "danger");
+        return;
+      }
+      const id = PatientService.nextId();
+      const patient = {
+        id: id, nombre: nombre + " (demo)", identificacion: "8-DEMO-" + id.split("-")[1],
+        edad: edad, telefono: "Sin registrar (demo)", correo: "Sin registrar (demo)", estado: estado,
+        alergias: ["Sin registrar"], medicamentos: ["Sin registrar"], antecedentes: ["Sin registrar"], condiciones: ["Sin registrar"],
+        proximaAtencion: null
+      };
+      PatientService.create(patient);
+      TimelineService.add({ id: "TL-" + Date.now(), patientId: id, type: "registro", title: "Paciente registrado", description: "Alta de paciente en el entorno de demostración.", date: new Date().toISOString().slice(0, 10), actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {} });
+      Modal.close();
+      Toast.show("Paciente de demostración creado.", "success");
+      navigateToPatient(id);
+    });
+  }
+
+  /* ============================================================
+     VISTA: PATIENT 360°
+     ============================================================ */
+  function navigateToPatient(id) {
+    AppState.selectedPatient = id;
+    AppState.currentView = "pacientes";
+    window.location.hash = "pacientes/" + id;
+    renderSidebarNav();
+    renderPatient360(id);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function pendingActionToast(label) {
+    Toast.show(label + " estará disponible en un sprint posterior del roadmap.", "accent");
+  }
+
+  function renderPatient360(id) {
+    const root = document.getElementById("view-root");
+    const p = PatientService.get(id);
+    if (!p) { renderPacientes(); return; }
+    const timeline = TimelineService.listByPatient(id);
+
+    const acciones = [
+      { label: "Nueva preconsulta", handler: function () { pendingActionToast("La preconsulta"); } },
+      { label: "Agendar cita", handler: function () { pendingActionToast("La agenda de citas"); } },
+      { label: "Iniciar videoconsulta", handler: function () { pendingActionToast("La videoconsulta de demostración"); } },
+      { label: "Ver documentos", handler: function () { pendingActionToast("El panel de documentos"); } },
+      { label: "Ver medicamentos", handler: function () { pendingActionToast("PharmaSync"); } },
+      { label: "Agregar seguimiento", handler: function () { openAddFollowUpModal(p.id); } }
+    ];
+
+    root.innerHTML =
+      '<div class="view-header">' +
+        '<div>' +
+          '<button class="btn btn-ghost btn-sm" id="back-to-list" style="padding-left:0;margin-bottom:8px;">← Volver a pacientes</button>' +
+          '<div class="view-header__eyebrow">Patient 360°</div>' +
+          '<h1>' + p.nombre + '</h1>' +
+          '<div class="view-header__desc">' + p.identificacion + ' · ' + p.edad + ' años</div>' +
+        '</div>' +
+        '<span class="badge ' + statusBadgeClass(p.estado) + '">' + p.estado + '</span>' +
+      '</div>' +
+
+      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;" class="p360-grid">' +
+
+        '<div>' +
+          UI.sectionBlock("Información básica", '', '<div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">' +
+            '<div><div style="color:var(--color-text-muted);font-size:11.5px;">Teléfono</div>' + p.telefono + '</div>' +
+            '<div><div style="color:var(--color-text-muted);font-size:11.5px;">Correo</div>' + p.correo + '</div>' +
+          '</div>') +
+
+          UI.sectionBlock("Resumen clínico", '', '<div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:13px;">' +
+            '<div><div style="color:var(--color-text-muted);font-size:11.5px;margin-bottom:4px;">Alergias declaradas</div>' + p.alergias.join(", ") + '</div>' +
+            '<div><div style="color:var(--color-text-muted);font-size:11.5px;margin-bottom:4px;">Medicamentos registrados</div>' + p.medicamentos.join(", ") + '</div>' +
+            '<div><div style="color:var(--color-text-muted);font-size:11.5px;margin-bottom:4px;">Antecedentes registrados</div>' + p.antecedentes.join(", ") + '</div>' +
+            '<div><div style="color:var(--color-text-muted);font-size:11.5px;margin-bottom:4px;">Condiciones registradas</div>' + p.condiciones.join(", ") + '</div>' +
+          '</div>') +
+
+          UI.sectionBlock("Timeline", '<span class="badge badge-neutral">' + timeline.length + ' eventos</span>',
+            timeline.length === 0
+              ? UI.emptyState("Sin eventos registrados", "Los eventos del paciente, preconsultas, citas, seguimientos, aparecerán aquí en orden cronológico.")
+              : '<div style="padding:6px 20px 16px;">' + timeline.map(function (t) {
+                  return (
+                    '<div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--color-border);">' +
+                      '<div class="mono" style="font-size:11px;color:var(--color-text-muted);width:78px;flex-shrink:0;padding-top:2px;">' + t.date + '</div>' +
+                      '<div>' +
+                        '<div style="font-weight:600;font-size:13px;">' + t.title + '</div>' +
+                        '<div style="font-size:12.5px;color:var(--color-text-muted);margin-top:2px;">' + t.description + '</div>' +
+                        '<div class="mono" style="font-size:10.5px;color:var(--color-text-faint);margin-top:4px;">' + t.actor + '</div>' +
+                      '</div>' +
+                    '</div>'
+                  );
+                }).join("") + '</div>'
+          ) +
+        '</div>' +
+
+        '<div>' +
+          UI.sectionBlock("Próxima atención", '', p.proximaAtencion
+            ? '<div style="padding:16px 20px;font-size:13px;line-height:1.9;">' +
+                '<div><strong>' + p.proximaAtencion.fecha + '</strong></div>' +
+                '<div>' + p.proximaAtencion.medico + '</div>' +
+                '<div>' + p.proximaAtencion.especialidad + ' · ' + p.proximaAtencion.modalidad + '</div>' +
+                '<span class="badge badge-accent" style="margin-top:6px;">' + p.proximaAtencion.estado + '</span>' +
+              '</div>'
+            : UI.emptyState("Sin próxima atención", "Este paciente no tiene citas programadas en el entorno de demostración.")
+          ) +
+
+          UI.sectionBlock("Acciones", '', '<div style="padding:12px 16px 16px;display:flex;flex-direction:column;gap:8px;">' +
+            acciones.map(function (a, i) {
+              return '<button class="btn btn-secondary btn-sm" data-action="' + i + '" style="justify-content:flex-start;">' + a.label + '</button>';
+            }).join("") +
+          '</div>') +
+        '</div>' +
+      '</div>';
+
+    document.getElementById("back-to-list").addEventListener("click", function () {
+      AppState.selectedPatient = null;
+      navigateTo("pacientes");
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-action]"), function (btn) {
+      btn.addEventListener("click", function () {
+        acciones[parseInt(btn.getAttribute("data-action"), 10)].handler();
+      });
+    });
+  }
+
+  function openAddFollowUpModal(patientId) {
+    Modal.open({
+      title: "Agregar seguimiento",
+      body:
+        '<div class="form-field"><label>Motivo</label><input type="text" id="fu-motivo" placeholder="Ej. Control de presión arterial"></div>' +
+        '<div class="form-field"><label>Notas</label><textarea id="fu-notas" rows="3" placeholder="Notas del seguimiento (demo)"></textarea></div>',
+      foot:
+        '<button class="btn btn-secondary" id="fu-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="fu-save">Guardar seguimiento</button>'
+    });
+    document.getElementById("fu-cancel").addEventListener("click", Modal.close);
+    document.getElementById("fu-save").addEventListener("click", function () {
+      const motivo = document.getElementById("fu-motivo").value.trim();
+      const notas = document.getElementById("fu-notas").value.trim();
+      if (!motivo) { Toast.show("Indica un motivo para el seguimiento.", "danger"); return; }
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: patientId, type: "seguimiento",
+        title: "Seguimiento: " + motivo,
+        description: notas || "Sin notas adicionales (demo).",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema",
+        metadata: {}
+      });
+      Modal.close();
+      Toast.show("Seguimiento agregado al timeline del paciente.", "success");
+      renderPatient360(patientId);
+    });
+  }
+
   function renderModuleStub(viewId) {
     const root = document.getElementById("view-root");
     const meta = VIEW_META[viewId];
@@ -1166,6 +1489,10 @@ textarea:focus-visible,
   function renderView(viewId) {
     if (viewId === "dashboard") return renderDashboard();
     if (viewId === "configuracion") return renderConfiguracion();
+    if (viewId === "pacientes") {
+      if (AppState.selectedPatient) return renderPatient360(AppState.selectedPatient);
+      return renderPacientes();
+    }
     return renderModuleStub(viewId);
   }
 
@@ -1180,6 +1507,7 @@ textarea:focus-visible,
      INICIALIZACIÓN
      ============================================================ */
   function init() {
+    seedPatientData();
     renderRoleGate();
 
     const savedSession = StorageService.get("session_role", null);
