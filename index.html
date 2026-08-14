@@ -363,6 +363,11 @@ textarea:focus-visible,
 .btn-danger { background: var(--color-danger); color: #fff; }
 .btn-danger:hover { background: #B91C1C; }
 .btn-sm { padding: 7px 12px; font-size: 12.5px; }
+@media (hover: none) and (pointer: coarse) {
+  .btn-sm { padding: 10px 14px; min-height: 40px; }
+  .nav-item { padding: 12px; }
+  .modal__close { width: 32px; height: 32px; }
+}
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
 
 .badge {
@@ -1174,13 +1179,22 @@ textarea:focus-visible,
      ROLES DEL SISTEMA
      ============================================================ */
   const ROLES = [
-    { id: "paciente", label: "Paciente", desc: "Consulta su historial, citas y documentos.", initials: "PA" },
     { id: "medico", label: "Médico", desc: "Gestiona consultas, recetas y seguimiento clínico.", initials: "MD" },
     { id: "especialista", label: "Especialista", desc: "Atiende referencias y consultas especializadas.", initials: "ES" },
     { id: "recepcion", label: "Recepción", desc: "Administra agenda, citas y registro de pacientes.", initials: "RC" },
     { id: "farmacia", label: "Farmacia", desc: "Consulta disponibilidad y despacho de medicamentos.", initials: "FA" },
     { id: "administrador", label: "Administrador", desc: "Supervisa analítica y configuración general.", initials: "AD" }
   ];
+
+  /* Módulos visibles por rol. El paciente ya no inicia sesión en el
+     CRM interno: su acceso es Nexus Contigo, el portal dedicado. */
+  const ROLE_MODULES = {
+    medico: ["dashboard", "pacientes", "agenda", "preconsulta", "consultas", "medicamentos", "documentos", "seguimiento"],
+    especialista: ["dashboard", "pacientes", "agenda", "consultas", "medicamentos", "documentos", "seguimiento"],
+    recepcion: ["dashboard", "pacientes", "agenda", "preconsulta", "documentos"],
+    farmacia: ["dashboard", "medicamentos"],
+    administrador: ["dashboard", "pacientes", "agenda", "preconsulta", "consultas", "medicamentos", "documentos", "seguimiento", "analitica", "configuracion"]
+  };
 
   const roleIcon = '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.8"/><path d="M4.5 20c0-4.1 3.4-6.8 7.5-6.8S19.5 15.9 19.5 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
 
@@ -1351,7 +1365,17 @@ textarea:focus-visible,
   /* ============================================================
      ROUTER
      ============================================================ */
+  function isModuleAllowed(viewId) {
+    if (!AppState.currentUser) return true;
+    const allowed = ROLE_MODULES[AppState.currentUser.role];
+    return !allowed || allowed.indexOf(viewId) !== -1;
+  }
+
   function navigateTo(viewId) {
+    if (!isModuleAllowed(viewId)) {
+      Toast.show("Tu rol no tiene acceso a este módulo.", "danger");
+      viewId = "dashboard";
+    }
     AppState.currentView = viewId;
     if (viewId !== "pacientes") AppState.selectedPatient = null;
     else AppState.selectedPatient = null;
@@ -1380,8 +1404,13 @@ textarea:focus-visible,
       AppState.selectedPatient = id;
       renderSidebarNav();
       renderPatient360(id);
+    } else if (raw.indexOf("consultas/") === 0) {
+      const id = raw.split("/")[1];
+      AppState.currentView = "consultas";
+      renderSidebarNav();
+      renderConsultaDetalle(id);
     } else {
-      const viewId = VIEW_META[raw] ? raw : "dashboard";
+      const viewId = VIEW_META[raw] && isModuleAllowed(raw) ? raw : "dashboard";
       AppState.currentView = viewId;
       if (viewId !== "pacientes") AppState.selectedPatient = null;
       renderSidebarNav();
@@ -1393,9 +1422,11 @@ textarea:focus-visible,
 
   function renderSidebarNav() {
     const nav = document.getElementById("sidebar-nav");
+    const allowed = (AppState.currentUser && ROLE_MODULES[AppState.currentUser.role]) || NAV_ITEMS.map(function (i) { return i.id; });
+    const visibleItems = NAV_ITEMS.filter(function (item) { return allowed.indexOf(item.id) !== -1; });
     nav.innerHTML =
       '<div class="sidebar__group-label">Módulos</div>' +
-      NAV_ITEMS.map(function (item) {
+      visibleItems.map(function (item) {
         const active = item.id === AppState.currentView;
         return (
           '<button type="button" class="nav-item' + (active ? " is-active" : "") + '" data-view="' + item.id + '">' +
@@ -2128,12 +2159,20 @@ textarea:focus-visible,
           date: new Date().toISOString().slice(0, 10),
           actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
         });
-        renderConsultaDetalle(consulta.id);
+        navigateToConsulta(consulta.id);
       });
     });
     Array.prototype.forEach.call(root.querySelectorAll("[data-open]"), function (row) {
-      row.addEventListener("click", function () { renderConsultaDetalle(row.getAttribute("data-open")); });
+      row.addEventListener("click", function () { navigateToConsulta(row.getAttribute("data-open")); });
     });
+  }
+
+  function navigateToConsulta(id) {
+    AppState.currentView = "consultas";
+    window.location.hash = "consultas/" + id;
+    renderSidebarNav();
+    renderConsultaDetalle(id);
+    window.scrollTo({ top: 0, behavior: "auto" });
   }
 
   function renderConsultaDetalle(id) {
@@ -2179,7 +2218,10 @@ textarea:focus-visible,
         '</div>' +
       '</div>';
 
-    document.getElementById("back-to-consultas").addEventListener("click", renderConsultas);
+    document.getElementById("back-to-consultas").addEventListener("click", function () {
+      window.location.hash = "consultas";
+      renderConsultas();
+    });
     document.getElementById("cd-new-doc").addEventListener("click", function () { openNewDocumentModal(c.patientId); });
     const noteBtn = document.getElementById("cd-save-note");
     if (noteBtn) noteBtn.addEventListener("click", function () {

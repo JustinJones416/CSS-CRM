@@ -99,6 +99,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .btn-ghost { background: transparent; color: var(--color-text-muted); border-radius: 10px; padding: 8px 12px; }
 .btn-ghost:hover { background: var(--color-surface-muted); color: var(--color-text); }
 .btn-sm { padding: 9px 16px; font-size: 13px; }
+@media (hover: none) and (pointer: coarse) {
+  .btn-sm { padding: 11px 18px; min-height: 42px; }
+  .p-list-item { padding: 14px 0; }
+  .modal__close { width: 32px; height: 32px; }
+}
 .btn-block { width: 100%; }
 
 /* ---- Hero ---- */
