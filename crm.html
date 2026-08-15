@@ -1128,14 +1128,19 @@ textarea:focus-visible,
   /* Resumen generado localmente por el asistente de orientación clínica.
      No es un diagnóstico: solo organiza la información declarada
      por el paciente para apoyar al profesional. */
+  function joinField(val, fallback) {
+    if (Array.isArray(val)) return val.length ? val.join(", ") : fallback;
+    return val || fallback;
+  }
+
   function generarResumenPreliminar(draft) {
     return (
       "Motivo de consulta declarado: " + (draft.motivo || "sin especificar") + ". " +
       "Síntomas reportados: " + (draft.sintomas || "sin especificar") + ", con una duración aproximada de " + (draft.duracion || "sin especificar") +
       " e intensidad autopercibida de " + (draft.intensidad || "sin especificar") + " sobre 10. " +
-      "Antecedentes declarados: " + (draft.antecedentes || "ninguno registrado") + ". " +
-      "Medicamentos actuales: " + (draft.medicamentos || "ninguno registrado") + ". " +
-      "Alergias declaradas: " + (draft.alergias || "ninguna registrada") + "."
+      "Antecedentes declarados: " + joinField(draft.antecedentes, "ninguno registrado") + ". " +
+      "Medicamentos actuales: " + joinField(draft.medicamentos, "ninguno registrado") + ". " +
+      "Alergias declaradas: " + joinField(draft.alergias, "ninguna registrada") + "."
     );
   }
 
@@ -1978,6 +1983,30 @@ textarea:focus-visible,
     precheckStep = 0;
   }
 
+  function openPreconsultaDetailModal(id) {
+    const pc = PreconsultaService.list().filter(function (x) { return x.id === id; })[0];
+    if (!pc) return;
+    const pat = PatientService.get(pc.patientId);
+    const row = function (label, val, fallback) {
+      return '<div style="margin-bottom:12px;"><div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:3px;">' + label + '</div><div style="font-size:13.5px;">' + joinField(val, fallback) + '</div></div>';
+    };
+    Modal.open({
+      title: "Preconsulta de " + (pat ? pat.nombre : pc.patientId),
+      body:
+        '<div style="margin-bottom:6px;"><span class="badge badge-warning">Enviada desde Nexus Contigo</span></div>' +
+        row("Motivo", pc.motivo, "sin especificar") +
+        row("Síntomas", pc.sintomas, "sin especificar") +
+        row("Duración", pc.duracion, "sin especificar") +
+        row("Intensidad", pc.intensidad ? pc.intensidad + " / 10" : "sin especificar") +
+        row("Antecedentes", pc.antecedentes, "ninguno registrado") +
+        row("Medicamentos actuales", pc.medicamentos, "ninguno registrado") +
+        row("Alergias", pc.alergias, "ninguna registrada") +
+        row("Archivos referenciados", pc.archivos, "ninguno"),
+      foot: '<button class="btn btn-secondary" id="pcd-close">Cerrar</button>'
+    });
+    document.getElementById("pcd-close").addEventListener("click", Modal.close);
+  }
+
   function renderPreconsulta(presetPatientId) {
     if (!precheckDraft) resetPrecheckDraft(presetPatientId);
     const root = document.getElementById("view-root");
@@ -1999,7 +2028,10 @@ textarea:focus-visible,
             pendientesPortal.map(function (pc) {
               const pat = PatientService.get(pc.patientId);
               return '<tr><td>' + (pat ? pat.nombre : pc.patientId) + '</td><td>' + pc.motivo + '</td><td class="mono">' + pc.fecha + '</td>' +
-                '<td style="text-align:right;"><button class="btn btn-secondary btn-sm" data-attend="' + pc.id + '">Marcar como atendida</button></td></tr>';
+                '<td style="text-align:right;white-space:nowrap;">' +
+                  '<button class="btn btn-ghost btn-sm" data-detail="' + pc.id + '">Ver detalle</button>' +
+                  '<button class="btn btn-secondary btn-sm" data-attend="' + pc.id + '">Marcar como atendida</button>' +
+                '</td></tr>';
             }).join("") + '</tbody></table>'
     ) : "";
 
@@ -2072,6 +2104,9 @@ textarea:focus-visible,
         Toast.show("Preconsulta marcada como atendida.", "success");
         renderPreconsulta();
       });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-detail]"), function (btn) {
+      btn.addEventListener("click", function () { openPreconsultaDetailModal(btn.getAttribute("data-detail")); });
     });
 
     const field = document.getElementById("pc-field");

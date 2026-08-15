@@ -103,6 +103,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   .btn-sm { padding: 11px 18px; min-height: 42px; }
   .p-list-item { padding: 14px 0; }
   .modal__close { width: 32px; height: 32px; }
+  .tag-chip button { width: 24px; height: 24px; }
+  .tag-chip { padding: 9px 10px 9px 14px; }
 }
 .btn-block { width: 100%; }
 
@@ -133,6 +135,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   .portal-topbar__inner { padding: 0 2px; }
   .p-card [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; gap: 0 !important; }
   input[type="range"] { height: 44px; }
+  .tag-input-row { flex-direction: column; }
+  .tag-input-row .btn-sm { width: 100%; }
 }
 
 /* ---- Cómo funciona ---- */
@@ -169,6 +173,31 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 }
 .field select:focus, .field input:focus { border-color: var(--color-primary); outline: none; }
 .access-hint { font-size: 11.5px; color: var(--color-text-faint); margin-top: 14px; text-align: center; }
+
+/* ---- Listas editables (antecedentes, medicamentos, alergias, archivos) ---- */
+.tag-input-row { display: flex; gap: 8px; }
+.tag-input-row input[type="text"] { flex: 1; }
+.tag-input-row input[type="file"] {
+  border: 1.5px dashed var(--color-border); border-radius: var(--radius-md); padding: 12px 14px;
+  background: var(--color-surface-muted); font-size: 13px; color: var(--color-text-muted);
+}
+.tag-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--color-primary-soft); color: var(--color-primary-dark);
+  font-size: 12.5px; font-weight: 600; padding: 7px 8px 7px 12px; border-radius: 999px;
+  margin: 0 6px 6px 0;
+}
+.tag-chip__text { cursor: pointer; }
+.tag-chip__text:hover { text-decoration: underline; }
+.tag-chip button {
+  width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.55);
+  color: var(--color-primary-dark); font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.tag-chip button:hover { background: #fff; }
+.tag-edit-input {
+  border: 1.5px solid var(--color-primary); border-radius: 999px; padding: 6px 12px; font-size: 12.5px;
+  margin: 0 6px 6px 0; min-width: 120px;
+}
 
 /* ---- Footer ---- */
 .pub-footer { border-top: 1px solid var(--color-border); padding: 32px 24px; text-align: center; color: var(--color-text-faint); font-size: 12px; }
@@ -297,13 +326,25 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   <section class="access-section" id="access">
     <div class="access-card">
       <h2>Accede a tu portal</h2>
-      <p class="sub">Selecciona tu nombre para ingresar a tu información.</p>
-      <div class="field">
-        <label>Paciente</label>
-        <select id="login-patient"></select>
+      <p class="sub" id="access-sub">Ingresa tu correo y te enviaremos un enlace de acceso.</p>
+
+      <div id="auth-supabase" style="display:none;">
+        <div class="field">
+          <label>Correo electrónico</label>
+          <input type="email" id="auth-email" placeholder="tucorreo@ejemplo.com" autocomplete="email">
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-send-link">Enviar enlace de acceso</button>
+        <div class="access-hint" id="auth-status"></div>
       </div>
-      <button class="btn btn-primary btn-block" id="btn-login">Ingresar</button>
-      <div class="access-hint" id="login-hint">Ingresa con tu identificación para ver tu información personal.</div>
+
+      <div id="auth-demo">
+        <div class="field">
+          <label>Paciente</label>
+          <select id="login-patient"></select>
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-login">Ingresar</button>
+        <div class="access-hint" id="login-hint">Modo de demostración: configura Supabase para activar el acceso por correo.</div>
+      </div>
     </div>
   </section>
 
@@ -333,9 +374,31 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   <div class="modal" id="modal-box"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (function () {
   "use strict";
+
+  /* ============================================================
+     CONFIGURACIÓN DE SUPABASE
+     Reemplaza estos dos valores con los de tu proyecto (Settings
+     → API en el panel de Supabase) para activar el inicio de
+     sesión real por correo. Mientras queden con estos valores de
+     ejemplo, el portal funciona en "modo de demostración": entra
+     seleccionando un paciente de una lista, sin autenticación
+     real, útil para seguir probando el prototipo sin backend.
+     ============================================================ */
+  const SUPABASE_URL = "https://vyucegunczzzoabbysdl.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_pgm9fc2Gd-rS8KJkJG1UYQ_n59pI8e8";
+
+  const supabaseConfigured =
+    SUPABASE_URL.indexOf("TU-PROYECTO") === -1 &&
+    SUPABASE_ANON_KEY.indexOf("TU-ANON-KEY") === -1 &&
+    typeof window.supabase !== "undefined";
+
+  const supabaseClient = supabaseConfigured
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
   /* Misma capa de almacenamiento y mismo prefijo que Nexus Clinical
      (el CRM interno), para leer los datos reales que el equipo
@@ -375,6 +438,67 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     }).join("");
   }
 
+  /* ------------------------------------------------------------
+     Decide qué formulario de acceso mostrar y conecta el flujo de
+     enlace mágico por correo cuando Supabase está configurado.
+     Si el proyecto tiene la tabla "patients" con la columna
+     patient_user_id vinculada a auth.users (ver supabase/migrations
+     en el repositorio), al volver del enlace de correo se busca
+     automáticamente el expediente correspondiente a esa cuenta.
+     ------------------------------------------------------------ */
+  function initAuth() {
+    const supaBlock = document.getElementById("auth-supabase");
+    const demoBlock = document.getElementById("auth-demo");
+    const sub = document.getElementById("access-sub");
+
+    if (!supabaseConfigured) {
+      supaBlock.style.display = "none";
+      demoBlock.style.display = "block";
+      sub.textContent = "Selecciona tu nombre para ingresar a tu información.";
+      return;
+    }
+
+    supaBlock.style.display = "block";
+    demoBlock.style.display = "none";
+    sub.textContent = "Ingresa tu correo y te enviaremos un enlace de acceso.";
+
+    document.getElementById("btn-send-link").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const status = document.getElementById("auth-status");
+      if (!email) { status.textContent = "Escribe tu correo para continuar."; return; }
+      status.textContent = "Enviando enlace…";
+      const { error } = await supabaseClient.auth.signInWithOtp({
+        email: email,
+        options: { emailRedirectTo: window.location.href.split("#")[0] }
+      });
+      status.textContent = error
+        ? "No se pudo enviar el enlace. Intenta de nuevo."
+        : "Revisa tu correo y abre el enlace para ingresar.";
+    });
+
+    supabaseClient.auth.getSession().then(async function (res) {
+      const session = res.data && res.data.session;
+      if (!session) return;
+      const { data: patientRow } = await supabaseClient
+        .from("patients").select("*").eq("patient_user_id", session.user.id).single();
+      if (patientRow) {
+        enterPortal(mapSupabasePatient(patientRow));
+      } else {
+        document.getElementById("auth-status").textContent =
+          "Tu cuenta aún no está vinculada a un expediente. Contacta a tu clínica.";
+      }
+    });
+  }
+
+  function mapSupabasePatient(row) {
+    return {
+      id: row.id, nombre: row.nombre, identificacion: row.identificacion, edad: row.edad,
+      telefono: row.telefono, correo: row.correo, estado: row.estado,
+      alergias: row.alergias || [], medicamentos: row.medicamentos || [],
+      antecedentes: row.antecedentes || [], condiciones: row.condiciones || []
+    };
+  }
+
   function enterPortal(patient) {
     currentPatient = patient;
     document.getElementById("public-site").style.display = "none";
@@ -385,6 +509,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
   function exitPortal() {
     currentPatient = null;
+    if (supabaseConfigured) supabaseClient.auth.signOut();
     document.getElementById("portal-shell").classList.remove("active");
     document.getElementById("public-site").style.display = "block";
     window.scrollTo({ top: 0 });
@@ -588,7 +713,93 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
      Escribe en las mismas claves (preconsultas, timeline) que usa
      Nexus Clinical, marcada con origen "paciente".
      ------------------------------------------------------------ */
+  /* Estado de las listas editables (antecedentes, medicamentos,
+     alergias, archivos). Vive fuera del innerHTML de la pantalla
+     para que agregar/quitar/editar un elemento nunca necesite
+     re-pintar el formulario completo, así el resto de lo que el
+     paciente ya escribió nunca se pierde. */
+  let pcTags = { antecedentes: [], medicamentos: [], alergias: [], archivos: [] };
+
+  function tagFieldHTML(key, label, placeholder, isFile) {
+    return (
+      '<div class="field">' +
+        '<label>' + label + '</label>' +
+        '<div class="tag-input-row">' +
+          (isFile
+            ? '<input type="file" id="tag-file-' + key + '" accept="image/*,.pdf" multiple style="flex:1;">'
+            : '<input type="text" id="tag-input-' + key + '" placeholder="' + placeholder + '">' +
+              '<button type="button" class="btn btn-secondary btn-sm" data-add-tag="' + key + '">Agregar</button>') +
+        '</div>' +
+        '<div class="tag-list" id="tag-list-' + key + '">' + renderChips(key) + '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderChips(key) {
+    if (pcTags[key].length === 0) {
+      return '<div style="font-size:11.5px;color:var(--color-text-faint);margin-top:8px;">Nada agregado todavía.</div>';
+    }
+    return '<div style="display:flex;flex-wrap:wrap;margin-top:10px;">' +
+      pcTags[key].map(function (val, i) {
+        return '<span class="tag-chip" data-key="' + key + '" data-index="' + i + '">' +
+          '<span class="tag-chip__text" data-edit="' + i + '">' + val + '</span>' +
+          '<button type="button" data-remove="' + i + '" aria-label="Quitar">&times;</button>' +
+        '</span>';
+      }).join("") + '</div>';
+  }
+
+  function updateTagList(key) {
+    document.getElementById("tag-list-" + key).innerHTML = renderChips(key);
+    wireTagList(key);
+  }
+
+  function wireTagList(key) {
+    const container = document.getElementById("tag-list-" + key);
+    Array.prototype.forEach.call(container.querySelectorAll("[data-remove]"), function (btn) {
+      btn.addEventListener("click", function () {
+        pcTags[key].splice(parseInt(btn.getAttribute("data-remove"), 10), 1);
+        updateTagList(key);
+      });
+    });
+    Array.prototype.forEach.call(container.querySelectorAll("[data-edit]"), function (span) {
+      span.addEventListener("click", function () {
+        const i = parseInt(span.getAttribute("data-edit"), 10);
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = pcTags[key][i];
+        input.className = "tag-edit-input";
+        span.replaceWith(input);
+        input.focus();
+        input.select();
+        function save() {
+          const val = input.value.trim();
+          if (val) pcTags[key][i] = val; else pcTags[key].splice(i, 1);
+          updateTagList(key);
+        }
+        input.addEventListener("blur", save);
+        input.addEventListener("keydown", function (e) { if (e.key === "Enter") input.blur(); });
+      });
+    });
+  }
+
+  function wireTagAdd(key) {
+    const addBtn = document.querySelector('[data-add-tag="' + key + '"]');
+    if (!addBtn) return;
+    const input = document.getElementById("tag-input-" + key);
+    function commit() {
+      const val = input.value.trim();
+      if (!val) return;
+      pcTags[key].push(val);
+      input.value = "";
+      updateTagList(key);
+      input.focus();
+    }
+    addBtn.addEventListener("click", commit);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); commit(); } });
+  }
+
   function renderPreconsultaScreen() {
+    pcTags = { antecedentes: [], medicamentos: [], alergias: [], archivos: [] };
     const main = document.getElementById("portal-main");
     main.innerHTML =
       '<button class="btn btn-ghost" id="pc-cancel" style="padding-left:0;margin-bottom:14px;">← Cancelar y volver</button>' +
@@ -602,10 +813,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         '<h3 style="margin-top:6px;">Síntomas</h3>' +
         '<div class="field"><textarea id="pc-sintomas" rows="3" placeholder="Describe con tus palabras lo que sientes" style="width:100%;border:1.5px solid var(--color-border);border-radius:var(--radius-md);padding:13px 14px;font-family:inherit;font-size:15.5px;resize:vertical;"></textarea></div>' +
 
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
-          '<div class="field"><label>Duración</label><input type="text" id="pc-duracion" placeholder="Ej. 3 días"></div>' +
-          '<div class="field"><label>Antecedentes</label><input type="text" id="pc-antecedentes" placeholder="Ej. Hipertensión"></div>' +
-        '</div>' +
+        '<div class="field"><label>Duración</label><input type="text" id="pc-duracion" placeholder="Ej. 3 días"></div>' +
 
         '<div class="field">' +
           '<label>Intensidad</label>' +
@@ -618,12 +826,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           '</div>' +
         '</div>' +
 
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
-          '<div class="field"><label>Medicamentos actuales</label><input type="text" id="pc-medicamentos" placeholder="Ej. Losartán 50 mg"></div>' +
-          '<div class="field"><label>Alergias</label><input type="text" id="pc-alergias" placeholder="Ej. Penicilina"></div>' +
-        '</div>' +
-
-        '<div class="field" style="margin-bottom:6px;"><label>Archivos o fotos (opcional)</label><input type="text" id="pc-archivos" placeholder="Nombre del archivo que le mostrarás a tu médico"></div>' +
+        tagFieldHTML("antecedentes", "Antecedentes", "Ej. Hipertensión") +
+        tagFieldHTML("medicamentos", "Medicamentos actuales", "Ej. Losartán 50 mg") +
+        tagFieldHTML("alergias", "Alergias", "Ej. Penicilina") +
+        tagFieldHTML("archivos", "Archivos o fotos", "", true) +
 
         '<button class="btn btn-primary btn-block" id="pc-submit" style="margin-top:8px;">Enviar a mi equipo médico</button>' +
       '</div>';
@@ -631,6 +837,17 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     const slider = document.getElementById("pc-intensidad");
     const sliderValue = document.getElementById("pc-intensidad-value");
     slider.addEventListener("input", function () { sliderValue.textContent = slider.value; });
+
+    ["antecedentes", "medicamentos", "alergias"].forEach(function (key) {
+      wireTagList(key);
+      wireTagAdd(key);
+    });
+    wireTagList("archivos");
+    document.getElementById("tag-file-archivos").addEventListener("change", function (e) {
+      Array.prototype.forEach.call(e.target.files, function (file) { pcTags.archivos.push(file.name); });
+      updateTagList("archivos");
+      e.target.value = "";
+    });
 
     document.getElementById("pc-cancel").addEventListener("click", confirmDiscardPreconsulta);
 
@@ -645,10 +862,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         sintomas: document.getElementById("pc-sintomas").value.trim(),
         duracion: document.getElementById("pc-duracion").value.trim(),
         intensidad: slider.value,
-        antecedentes: document.getElementById("pc-antecedentes").value.trim(),
-        medicamentos: document.getElementById("pc-medicamentos").value.trim(),
-        alergias: document.getElementById("pc-alergias").value.trim(),
-        archivos: document.getElementById("pc-archivos").value.trim(),
+        antecedentes: pcTags.antecedentes.slice(),
+        medicamentos: pcTags.medicamentos.slice(),
+        alergias: pcTags.alergias.slice(),
+        archivos: pcTags.archivos.slice(),
         estado: "Pendiente", origen: "paciente",
         fecha: new Date().toISOString().slice(0, 10)
       };
@@ -661,11 +878,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   }
 
   function preconsultaHasProgress() {
-    const ids = ["pc-motivo", "pc-sintomas", "pc-duracion", "pc-antecedentes", "pc-medicamentos", "pc-alergias", "pc-archivos"];
-    return ids.some(function (id) {
+    const ids = ["pc-motivo", "pc-sintomas", "pc-duracion"];
+    const hasText = ids.some(function (id) {
       const el = document.getElementById(id);
       return el && el.value.trim();
     });
+    const hasTags = Object.keys(pcTags).some(function (key) { return pcTags[key].length > 0; });
+    return hasText || hasTags;
   }
 
   function confirmDiscardPreconsulta() {
@@ -744,6 +963,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
   document.addEventListener("DOMContentLoaded", function () {
     initLoginSelect();
+    initAuth();
     const hash = window.location.hash;
     if (hash === "#portal" || hash === "#portal/preconsulta") {
       const savedId = sessionStorage.getItem("nexus_contigo_patient");
