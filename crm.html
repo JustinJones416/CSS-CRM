@@ -1157,23 +1157,61 @@ textarea:focus-visible,
      ============================================================ */
   const FOLLOWUP_STATUSES = ["Pendiente", "En seguimiento", "Completado", "Cancelado"];
 
+  /* ============================================================
+     SUPABASE SYNC — Seguimiento
+     ============================================================ */
+  const FollowUpSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("followups").select("*").order("created_at", { ascending: false });
+      if (error || !data) return;
+      StorageService.set("followups", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, motivo: row.motivo,
+          responsable: row.responsable || "Sin asignar", proximaAccion: row.proxima_accion || "Sin definir",
+          notas: row.notas || "Sin notas adicionales", estado: row.estado,
+          fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("followups").insert({
+        id: entry.id, patient_id: entry.patientId, motivo: entry.motivo,
+        responsable: entry.responsable, proxima_accion: entry.proximaAccion,
+        notas: entry.notas, estado: entry.estado
+      });
+    },
+    pushEstado: async function (id, estado) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("followups").update({ estado: estado }).eq("id", id);
+    }
+  };
+
   const FollowUpService = {
     list: function () { return StorageService.get("followups", []); },
     byPatient: function (patientId) {
       return FollowUpService.list().filter(function (f) { return f.patientId === patientId; });
     },
-    nextId: function () { return "SEG-" + String(FollowUpService.list().length + 1).padStart(4, "0"); },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "SEG-" + String(FollowUpService.list().length + 1).padStart(4, "0");
+    },
     create: function (entry) {
-      return StorageService.update("followups", function (list) {
+      const result = StorageService.update("followups", function (list) {
         list = list || [];
         list.push(entry);
         return list;
       }, []);
+      FollowUpSync.pushCreate(entry);
+      return result;
     },
     updateEstado: function (id, estado) {
-      return StorageService.update("followups", function (list) {
+      const result = StorageService.update("followups", function (list) {
         return (list || []).map(function (f) { return f.id === id ? Object.assign({}, f, { estado: estado }) : f; });
       }, []);
+      FollowUpSync.pushEstado(id, estado);
+      return result;
     },
     pendingCount: function () {
       return FollowUpService.list().filter(function (f) { return f.estado === "Pendiente" || f.estado === "En seguimiento"; }).length;
@@ -1714,6 +1752,7 @@ textarea:focus-visible,
         await ConsultaSync.pullAll();
         await MedicationSync.pullOrSeed();
         await DocumentSync.pullAll();
+        await FollowUpSync.pullAll();
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
@@ -3199,6 +3238,7 @@ textarea:focus-visible,
       viewHeader("seguimiento") +
       '<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;">' +
         '<select id="seg-filter" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:9px 12px;font-size:13px;background:var(--color-surface);color:var(--color-text);">' + filterOptions + '</select>' +
+        (supabaseConfigured ? '<button class="btn btn-secondary btn-sm" id="btn-sync-seg">Sincronizar</button>' : '') +
       '</div>' +
       UI.sectionBlock(
         "Seguimientos",
@@ -3207,6 +3247,13 @@ textarea:focus-visible,
       );
 
     document.getElementById("seg-filter").addEventListener("change", function (e) { renderSeguimiento(e.target.value); });
+    const syncSegBtn = document.getElementById("btn-sync-seg");
+    if (syncSegBtn) syncSegBtn.addEventListener("click", async function () {
+      syncSegBtn.textContent = "Sincronizando…";
+      await FollowUpSync.pullAll();
+      Toast.show("Seguimientos actualizados desde Supabase.", "success");
+      renderSeguimiento(filterEstado);
+    });
     Array.prototype.forEach.call(root.querySelectorAll("[data-status]"), function (sel) {
       sel.addEventListener("change", function () {
         FollowUpService.updateEstado(sel.getAttribute("data-status"), sel.value);
