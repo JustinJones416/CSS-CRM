@@ -1819,7 +1819,8 @@ textarea:focus-visible,
         await PreconsultaSync.pullAll();
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
-        status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
+        status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
+        await supabaseClient.from("access_requests").upsert({ user_id: session.user.id, email: session.user.email });
       }
     }
 
@@ -3366,6 +3367,11 @@ textarea:focus-visible,
   function renderStaffManagementCard() {
     return (
       '<div class="card" style="margin-bottom:20px;">' +
+        '<div class="card-title">Solicitudes de acceso</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Personas que crearon una cuenta e intentaron entrar sin tener un rol asignado todavía.</div>' +
+        '<div id="access-requests-list">Cargando…</div>' +
+      '</div>' +
+      '<div class="card" style="margin-bottom:20px;">' +
         '<div class="card-title">Gestión de personal</div>' +
         '<div class="card-sub" style="margin-bottom:16px;">Da de alta a un miembro del personal ya registrado en Supabase Auth, asignándole su rol dentro de Nexus Clinical.</div>' +
         '<div class="form-field"><label>Nombre completo</label><input type="text" id="staff-nombre" placeholder="Ej. Dra. Ana Torres"></div>' +
@@ -3388,6 +3394,52 @@ textarea:focus-visible,
   }
 
   function wireStaffManagementCard() {
+    async function loadAccessRequests() {
+      const listEl = document.getElementById("access-requests-list");
+      const { data, error } = await supabaseClient.from("access_requests").select("*").order("requested_at");
+      if (error || !data) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">No se pudo cargar la lista.</div>'; return; }
+      if (data.length === 0) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">Sin solicitudes pendientes.</div>'; return; }
+      listEl.innerHTML = data.map(function (r) {
+        return (
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--color-border);flex-wrap:wrap;">' +
+            '<div><div style="font-weight:600;font-size:13px;">' + r.email + '</div><div class="mono" style="font-size:10.5px;color:var(--color-text-muted);">' + r.user_id + '</div></div>' +
+            '<div style="display:flex;gap:8px;align-items:center;">' +
+              '<select data-req-role="' + r.user_id + '" style="border:1px solid var(--color-border);border-radius:8px;padding:6px 8px;font-size:12px;">' +
+                '<option value="medico">Médico</option><option value="especialista">Especialista</option>' +
+                '<option value="recepcion">Recepción</option><option value="farmacia">Farmacia</option>' +
+                '<option value="administrador">Administrador</option>' +
+              '</select>' +
+              '<button class="btn btn-primary btn-sm" data-approve="' + r.user_id + '" data-email="' + r.email + '">Aprobar</button>' +
+              '<button class="btn btn-ghost btn-sm" data-reject="' + r.user_id + '">Rechazar</button>' +
+            '</div>' +
+          '</div>'
+        );
+      }).join("");
+
+      Array.prototype.forEach.call(listEl.querySelectorAll("[data-approve]"), function (btn) {
+        btn.addEventListener("click", async function () {
+          const uid = btn.getAttribute("data-approve");
+          const email = btn.getAttribute("data-email");
+          const role = listEl.querySelector('[data-req-role="' + uid + '"]').value;
+          btn.textContent = "Aprobando…";
+          await supabaseClient.from("staff_profiles").insert({ id: uid, full_name: email, role: role });
+          await supabaseClient.from("access_requests").delete().eq("user_id", uid);
+          Toast.show("Acceso aprobado.", "success");
+          loadAccessRequests();
+          loadStaffList();
+        });
+      });
+      Array.prototype.forEach.call(listEl.querySelectorAll("[data-reject]"), function (btn) {
+        btn.addEventListener("click", async function () {
+          await supabaseClient.from("access_requests").delete().eq("user_id", btn.getAttribute("data-reject"));
+          Toast.show("Solicitud rechazada.", "success");
+          loadAccessRequests();
+        });
+      });
+    }
+    loadAccessRequests();
+
+
     async function loadStaffList() {
       const listEl = document.getElementById("staff-list");
       const { data, error } = await supabaseClient.from("staff_profiles").select("*").order("full_name");
