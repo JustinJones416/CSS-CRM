@@ -708,7 +708,7 @@ textarea:focus-visible,
 <body>
 
 <!-- ============================================================
-     PANTALLA DE ENTRADA — SELECTOR DE ROL (SIN AUTENTICACIÓN REAL)
+     PANTALLA DE ENTRADA — INICIO DE SESIÓN
      ============================================================ -->
 <div id="role-gate">
   <div class="gate-card">
@@ -719,20 +719,26 @@ textarea:focus-visible,
         <div class="gate-brand__sub">SUITE DE GESTIÓN CLÍNICA</div>
       </div>
     </div>
-    <h1 style="font-size:17px;font-weight:700;">Selecciona un rol para ingresar al prototipo</h1>
-    <p style="font-size:13px;color:var(--color-text-muted);margin-top:6px;">
-      Este selector reemplaza temporalmente la autenticación real. Cada rol determina qué módulos y acciones quedan visibles.
-    </p>
 
-    <div class="role-grid" id="role-grid"></div>
-
-    <div style="margin-top:24px;display:flex;justify-content:flex-end;">
-      <button class="btn btn-primary" id="btn-enter-app" disabled>Entrar al CRM</button>
+    <div id="auth-supabase" style="display:none;margin-top:18px;">
+      <h1 style="font-size:17px;font-weight:700;margin-bottom:14px;">Accede con tu correo institucional</h1>
+      <div class="form-field">
+        <label>Correo</label>
+        <input type="email" id="auth-email" placeholder="tucorreo@css.gob.pa" autocomplete="email">
+      </div>
+      <button class="btn btn-primary" id="btn-send-link" style="width:100%;">Enviar enlace de acceso</button>
+      <div class="gate-foot" id="auth-status" style="margin-top:16px;"></div>
     </div>
 
-    <div class="gate-foot">
-      <strong style="color:var(--color-text-muted);font-weight:600;">Acceso por rol</strong>
-      Cada rol determina los módulos y acciones disponibles dentro de la plataforma.
+    <div id="auth-demo">
+      <h1 style="font-size:17px;font-weight:700;">Selecciona un rol para ingresar al prototipo</h1>
+      <p style="font-size:13px;color:var(--color-text-muted);margin-top:6px;">
+        Modo de demostración: configura Supabase para activar el acceso real por correo.
+      </p>
+      <div class="role-grid" id="role-grid"></div>
+      <div style="margin-top:24px;display:flex;justify-content:flex-end;">
+        <button class="btn btn-primary" id="btn-enter-app" disabled>Entrar al CRM</button>
+      </div>
     </div>
   </div>
 </div>
@@ -795,9 +801,29 @@ textarea:focus-visible,
 
 <div class="toast-stack" id="toast-stack"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (function () {
   "use strict";
+
+  /* ============================================================
+     CONFIGURACIÓN DE SUPABASE — mismo proyecto que Nexus Contigo.
+     El personal inicia sesión con su correo; su rol se lee de la
+     tabla staff_profiles (ver supabase/migrations/0001_init.sql).
+     Si estos valores quedan como placeholder, el CRM cae al modo
+     de demostración con el selector de rol manual.
+     ============================================================ */
+  const SUPABASE_URL = "https://vyucegunczzzoabbysdl.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_pgm9fc2Gd-rS8KJkJG1UYQ_n59pI8e8";
+
+  const supabaseConfigured =
+    SUPABASE_URL.indexOf("TU-PROYECTO") === -1 &&
+    SUPABASE_ANON_KEY.indexOf("TU-ANON-KEY") === -1 &&
+    typeof window.supabase !== "undefined";
+
+  const supabaseClient = supabaseConfigured
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
   /* ============================================================
      ICONOS (sprite mínimo en línea)
@@ -1345,8 +1371,7 @@ textarea:focus-visible,
     });
   }
 
-  function enterWithRole(roleId) {
-    const role = ROLES.filter(function (r) { return r.id === roleId; })[0];
+  function enterWithRoleObject(role) {
     AppState.currentUser = { role: role.id, label: role.label, initials: role.initials };
     StorageService.set("session_role", AppState.currentUser);
 
@@ -1361,9 +1386,71 @@ textarea:focus-visible,
     Toast.show("Sesión iniciada como " + role.label + ".", "success");
   }
 
+  function enterWithRole(roleId) {
+    const role = ROLES.filter(function (r) { return r.id === roleId; })[0];
+    enterWithRoleObject(role);
+  }
+
+  /* ------------------------------------------------------------
+     Autenticación real por correo (enlace mágico). El rol no se
+     elige manualmente: se lee de staff_profiles según la cuenta
+     que inició sesión. Si Supabase no está configurado, el CRM
+     cae automáticamente al selector de rol de demostración.
+     ------------------------------------------------------------ */
+  const STAFF_ROLE_META = {
+    medico: { label: "Médico", initials: "MD" },
+    especialista: { label: "Especialista", initials: "ES" },
+    recepcion: { label: "Recepción", initials: "RC" },
+    farmacia: { label: "Farmacia", initials: "FA" },
+    administrador: { label: "Administrador", initials: "AD" }
+  };
+
+  function initAuth() {
+    const supaBlock = document.getElementById("auth-supabase");
+    const demoBlock = document.getElementById("auth-demo");
+
+    if (!supabaseConfigured) {
+      supaBlock.style.display = "none";
+      demoBlock.style.display = "block";
+      return;
+    }
+
+    supaBlock.style.display = "block";
+    demoBlock.style.display = "none";
+
+    document.getElementById("btn-send-link").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const status = document.getElementById("auth-status");
+      if (!email) { status.textContent = "Escribe tu correo institucional para continuar."; return; }
+      status.textContent = "Enviando enlace…";
+      const { error } = await supabaseClient.auth.signInWithOtp({
+        email: email,
+        options: { emailRedirectTo: window.location.href.split("#")[0] }
+      });
+      status.textContent = error
+        ? "No se pudo enviar el enlace. Intenta de nuevo."
+        : "Revisa tu correo y abre el enlace para ingresar.";
+    });
+
+    supabaseClient.auth.getSession().then(async function (res) {
+      const session = res.data && res.data.session;
+      if (!session) return;
+      const { data: staffRow } = await supabaseClient
+        .from("staff_profiles").select("*").eq("id", session.user.id).single();
+      const status = document.getElementById("auth-status");
+      const meta = staffRow && STAFF_ROLE_META[staffRow.role];
+      if (meta) {
+        enterWithRoleObject({ id: staffRow.role, label: meta.label, initials: meta.initials });
+      } else if (status) {
+        status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
+      }
+    });
+  }
+
   document.getElementById("btn-switch-role").addEventListener("click", function () {
     StorageService.delete("session_role");
     AppState.currentUser = null;
+    if (supabaseConfigured) supabaseClient.auth.signOut();
     document.getElementById("app-shell").classList.remove("active");
     document.getElementById("role-gate").style.display = "flex";
   });
@@ -2667,9 +2754,67 @@ textarea:focus-visible,
       );
   }
 
+  function renderStaffManagementCard() {
+    return (
+      '<div class="card" style="margin-bottom:20px;">' +
+        '<div class="card-title">Gestión de personal</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Da de alta a un miembro del personal ya registrado en Supabase Auth, asignándole su rol dentro de Nexus Clinical.</div>' +
+        '<div class="form-field"><label>Nombre completo</label><input type="text" id="staff-nombre" placeholder="Ej. Dra. Ana Torres"></div>' +
+        '<div class="form-field"><label>ID de usuario (Supabase → Authentication → Users)</label><input type="text" id="staff-uid" placeholder="uuid del usuario"></div>' +
+        '<div class="form-field"><label>Rol</label><select id="staff-rol">' +
+          '<option value="medico">Médico</option>' +
+          '<option value="especialista">Especialista</option>' +
+          '<option value="recepcion">Recepción</option>' +
+          '<option value="farmacia">Farmacia</option>' +
+          '<option value="administrador">Administrador</option>' +
+        '</select></div>' +
+        '<button class="btn btn-primary btn-sm" id="staff-add">Dar de alta</button>' +
+        '<div id="staff-status" style="font-size:12px;color:var(--color-text-muted);margin-top:10px;"></div>' +
+        '<div class="section-block" style="margin-top:18px;box-shadow:none;">' +
+          '<div class="section-block__head"><h3>Personal registrado</h3></div>' +
+          '<div class="section-block__body" id="staff-list" style="padding:16px 20px;">Cargando…</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function wireStaffManagementCard() {
+    async function loadStaffList() {
+      const listEl = document.getElementById("staff-list");
+      const { data, error } = await supabaseClient.from("staff_profiles").select("*").order("full_name");
+      if (error || !data) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">No se pudo cargar el personal.</div>'; return; }
+      if (data.length === 0) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">Aún no hay personal registrado.</div>'; return; }
+      listEl.innerHTML = data.map(function (s) {
+        const meta = STAFF_ROLE_META[s.role] || { label: s.role };
+        return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--color-border);font-size:13px;">' +
+          '<span>' + s.full_name + '</span><span class="badge badge-neutral">' + meta.label + '</span></div>';
+      }).join("");
+    }
+    loadStaffList();
+
+    document.getElementById("staff-add").addEventListener("click", async function () {
+      const nombre = document.getElementById("staff-nombre").value.trim();
+      const uid = document.getElementById("staff-uid").value.trim();
+      const rol = document.getElementById("staff-rol").value;
+      const status = document.getElementById("staff-status");
+      if (!nombre || !uid) { status.textContent = "Completa nombre e ID de usuario."; return; }
+      status.textContent = "Guardando…";
+      const { error } = await supabaseClient.from("staff_profiles").insert({ id: uid, full_name: nombre, role: rol });
+      if (error) {
+        status.textContent = "No se pudo guardar: " + error.message;
+      } else {
+        status.textContent = "Personal registrado correctamente.";
+        document.getElementById("staff-nombre").value = "";
+        document.getElementById("staff-uid").value = "";
+        loadStaffList();
+      }
+    });
+  }
+
   function renderConfiguracion() {
     const root = document.getElementById("view-root");
     const role = AppState.currentUser;
+    const isAdmin = role.role === "administrador";
     root.innerHTML =
       viewHeader("configuracion") +
       '<div class="card" style="margin-bottom:20px;">' +
@@ -2683,6 +2828,9 @@ textarea:focus-visible,
           '<button class="btn btn-secondary" id="cfg-switch-role">Cambiar rol</button>' +
         '</div>' +
       '</div>' +
+
+      (isAdmin && supabaseConfigured ? renderStaffManagementCard() : '') +
+
       '<div class="card" style="margin-bottom:20px;">' +
         '<div class="card-title">Entorno</div>' +
         '<div class="card-sub">La seguridad avanzada, autenticación e integración institucional se habilitan en la fase de despliegue.</div>' +
@@ -2692,6 +2840,8 @@ textarea:focus-visible,
         '<div class="card-sub" style="margin-bottom:14px;">Elimina toda la información almacenada localmente en este navegador.</div>' +
         '<button class="btn btn-danger btn-sm" id="cfg-clear-data">Borrar datos locales</button>' +
       '</div>';
+
+    if (isAdmin && supabaseConfigured) wireStaffManagementCard();
 
     document.getElementById("cfg-switch-role").addEventListener("click", function () {
       document.getElementById("btn-switch-role").click();
@@ -2745,6 +2895,7 @@ textarea:focus-visible,
     seedAppointmentData();
     seedMedicationData();
     renderRoleGate();
+    initAuth();
 
     const savedSession = StorageService.get("session_role", null);
     if (savedSession && savedSession.role) {
