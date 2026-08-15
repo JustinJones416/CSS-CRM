@@ -979,13 +979,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
     document.getElementById("pc-cancel").addEventListener("click", confirmDiscardPreconsulta);
 
-    document.getElementById("pc-submit").addEventListener("click", function () {
+    document.getElementById("pc-submit").addEventListener("click", async function () {
       const motivo = document.getElementById("pc-motivo").value.trim();
       if (!motivo) { document.getElementById("pc-motivo").focus(); return; }
       const p = currentPatient;
       const list = StorageService.get("preconsultas", []);
       const entry = {
-        id: "PRE-" + String(list.length + 1).padStart(4, "0"),
+        id: (supabaseConfigured && window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : "PRE-" + String(list.length + 1).padStart(4, "0"),
         patientId: p.id, motivo: motivo,
         sintomas: document.getElementById("pc-sintomas").value.trim(),
         duracion: document.getElementById("pc-duracion").value.trim(),
@@ -1001,6 +1001,16 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       const tl = StorageService.get("timeline", []);
       tl.push({ id: "TL-" + Date.now(), patientId: p.id, type: "preconsulta", title: "Preconsulta enviada por el paciente", description: "Motivo: " + motivo, date: new Date().toISOString().slice(0, 10), actor: p.nombre, metadata: {} });
       StorageService.set("timeline", tl);
+      if (supabaseConfigured) {
+        const toArr = function (v) { return Array.isArray(v) ? v : (v ? [v] : []); };
+        await supabaseClient.from("preconsultas").insert({
+          id: entry.id, patient_id: entry.patientId, motivo: entry.motivo,
+          sintomas: entry.sintomas, duracion: entry.duracion, intensidad: String(entry.intensidad || ""),
+          antecedentes: toArr(entry.antecedentes), medicamentos: toArr(entry.medicamentos),
+          alergias: toArr(entry.alergias), archivos: toArr(entry.archivos),
+          estado: entry.estado, origen: "paciente"
+        });
+      }
       window.history.back();
     });
   }

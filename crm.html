@@ -1382,18 +1382,75 @@ textarea:focus-visible,
   /* ============================================================
      PRECONSULTA SERVICE — Preconsulta Inteligente
      ============================================================ */
+  /* ============================================================
+     SUPABASE SYNC — Preconsultas
+     El vínculo real entre Nexus Contigo y Nexus Clinical para este
+     módulo: una preconsulta enviada desde el portal del paciente
+     debe llegar aquí sin depender de que ambos usen el mismo
+     navegador.
+     ============================================================ */
+  const PreconsultaSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("preconsultas").select("*").order("created_at", { ascending: false });
+      if (error || !data) return;
+      StorageService.set("preconsultas", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, motivo: row.motivo,
+          sintomas: row.sintomas || "", duracion: row.duracion || "", intensidad: row.intensidad || "",
+          antecedentes: row.antecedentes || [], medicamentos: row.medicamentos || [],
+          alergias: row.alergias || [], archivos: row.archivos || [],
+          estado: row.estado, origen: row.origen || "personal",
+          fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("preconsultas").insert({
+        id: entry.id, patient_id: entry.patientId, motivo: entry.motivo,
+        sintomas: entry.sintomas, duracion: entry.duracion, intensidad: String(entry.intensidad || ""),
+        antecedentes: toArrayField(entry.antecedentes), medicamentos: toArrayField(entry.medicamentos),
+        alergias: toArrayField(entry.alergias), archivos: toArrayField(entry.archivos),
+        estado: entry.estado, origen: entry.origen || "personal"
+      });
+    },
+    pushEstado: async function (id, estado) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("preconsultas").update({ estado: estado }).eq("id", id);
+    }
+  };
+
+  function toArrayField(val) {
+    if (Array.isArray(val)) return val;
+    if (!val) return [];
+    return [val];
+  }
+
   const PreconsultaService = {
     list: function () { return StorageService.get("preconsultas", []); },
     listByPatient: function (patientId) {
       return PreconsultaService.list().filter(function (p) { return p.patientId === patientId; });
     },
-    nextId: function () { return "PRE-" + String(PreconsultaService.list().length + 1).padStart(4, "0"); },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "PRE-" + String(PreconsultaService.list().length + 1).padStart(4, "0");
+    },
     create: function (entry) {
-      return StorageService.update("preconsultas", function (list) {
+      const result = StorageService.update("preconsultas", function (list) {
         list = list || [];
         list.push(entry);
         return list;
       }, []);
+      PreconsultaSync.pushCreate(entry);
+      return result;
+    },
+    updateEstado: function (id, estado) {
+      const result = StorageService.update("preconsultas", function (list) {
+        return (list || []).map(function (p) { return p.id === id ? Object.assign({}, p, { estado: estado }) : p; });
+      }, []);
+      PreconsultaSync.pushEstado(id, estado);
+      return result;
     },
     pendingCount: function () {
       return PreconsultaService.list().filter(function (p) { return p.estado === "Pendiente"; }).length;
@@ -1753,6 +1810,7 @@ textarea:focus-visible,
         await MedicationSync.pullOrSeed();
         await DocumentSync.pullAll();
         await FollowUpSync.pullAll();
+        await PreconsultaSync.pullAll();
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
@@ -2531,7 +2589,8 @@ textarea:focus-visible,
     const pendientesPortal = PreconsultaService.list().filter(function (pc) { return pc.origen === "paciente" && pc.estado === "Pendiente"; });
     const pendientesBlock = precheckStep === 0 ? UI.sectionBlock(
       "Preconsultas recibidas desde Nexus Contigo",
-      '<span class="badge badge-neutral">' + pendientesPortal.length + '</span>',
+      '<span class="badge badge-neutral">' + pendientesPortal.length + '</span>' +
+        (supabaseConfigured ? ' <button class="btn btn-ghost btn-sm" id="btn-sync-precheck">Sincronizar</button>' : ''),
       pendientesPortal.length === 0
         ? UI.emptyState("Sin preconsultas pendientes", "Las preconsultas que un paciente envíe desde su portal aparecerán aquí para revisión.")
         : '<table class="table"><thead><tr><th>Paciente</th><th>Motivo</th><th>Fecha</th><th></th></tr></thead><tbody>' +
@@ -2607,13 +2666,17 @@ textarea:focus-visible,
     Array.prototype.forEach.call(root.querySelectorAll("[data-attend]"), function (btn) {
       btn.addEventListener("click", function () {
         const id = btn.getAttribute("data-attend");
-        const list = PreconsultaService.list().map(function (pc) {
-          return pc.id === id ? Object.assign({}, pc, { estado: "Atendida" }) : pc;
-        });
-        StorageService.set("preconsultas", list);
+        PreconsultaService.updateEstado(id, "Atendida");
         Toast.show("Preconsulta marcada como atendida.", "success");
         renderPreconsulta();
       });
+    });
+    const syncPrecheckBtn = document.getElementById("btn-sync-precheck");
+    if (syncPrecheckBtn) syncPrecheckBtn.addEventListener("click", async function () {
+      syncPrecheckBtn.textContent = "Sincronizando…";
+      await PreconsultaSync.pullAll();
+      Toast.show("Preconsultas actualizadas desde Supabase.", "success");
+      renderPreconsulta();
     });
     Array.prototype.forEach.call(root.querySelectorAll("[data-detail]"), function (btn) {
       btn.addEventListener("click", function () { openPreconsultaDetailModal(btn.getAttribute("data-detail")); });
