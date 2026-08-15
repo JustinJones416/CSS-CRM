@@ -726,7 +726,12 @@ textarea:focus-visible,
         <label>Correo</label>
         <input type="email" id="auth-email" placeholder="tucorreo@css.gob.pa" autocomplete="email">
       </div>
-      <button class="btn btn-primary" id="btn-send-link" style="width:100%;">Enviar enlace de acceso</button>
+      <div class="form-field">
+        <label>Contraseña</label>
+        <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary" id="btn-login-pw" style="width:100%;">Ingresar</button>
+      <button class="btn btn-secondary" id="btn-signup-pw" style="width:100%;margin-top:8px;">Crear cuenta con este correo</button>
       <div class="gate-foot" id="auth-status" style="margin-top:16px;"></div>
     </div>
 
@@ -1392,7 +1397,7 @@ textarea:focus-visible,
   }
 
   /* ------------------------------------------------------------
-     Autenticación real por correo (enlace mágico). El rol no se
+     Autenticación real por correo y contraseña. El rol no se
      elige manualmente: se lee de staff_profiles según la cuenta
      que inició sesión. Si Supabase no está configurado, el CRM
      cae automáticamente al selector de rol de demostración.
@@ -1418,32 +1423,47 @@ textarea:focus-visible,
     supaBlock.style.display = "block";
     demoBlock.style.display = "none";
 
-    document.getElementById("btn-send-link").addEventListener("click", async function () {
-      const email = document.getElementById("auth-email").value.trim();
-      const status = document.getElementById("auth-status");
-      if (!email) { status.textContent = "Escribe tu correo institucional para continuar."; return; }
-      status.textContent = "Enviando enlace…";
-      const { error } = await supabaseClient.auth.signInWithOtp({
-        email: email,
-        options: { emailRedirectTo: window.location.href.split("#")[0] }
-      });
-      status.textContent = error
-        ? "No se pudo enviar el enlace. Intenta de nuevo."
-        : "Revisa tu correo y abre el enlace para ingresar.";
-    });
-
-    supabaseClient.auth.getSession().then(async function (res) {
-      const session = res.data && res.data.session;
-      if (!session) return;
+    async function resolveSession(session, status) {
       const { data: staffRow } = await supabaseClient
         .from("staff_profiles").select("*").eq("id", session.user.id).single();
-      const status = document.getElementById("auth-status");
       const meta = staffRow && STAFF_ROLE_META[staffRow.role];
       if (meta) {
         enterWithRoleObject({ id: staffRow.role, label: meta.label, initials: meta.initials });
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
       }
+    }
+
+    document.getElementById("btn-login-pw").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const password = document.getElementById("auth-password").value;
+      const status = document.getElementById("auth-status");
+      if (!email || !password) { status.textContent = "Escribe tu correo y contraseña."; return; }
+      status.textContent = "Ingresando…";
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email: email, password: password });
+      if (error) { status.textContent = "Correo o contraseña incorrectos."; return; }
+      resolveSession(data.session, status);
+    });
+
+    document.getElementById("btn-signup-pw").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const password = document.getElementById("auth-password").value;
+      const status = document.getElementById("auth-status");
+      if (!email || !password) { status.textContent = "Escribe tu correo y contraseña."; return; }
+      if (password.length < 6) { status.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+      status.textContent = "Creando cuenta…";
+      const { data, error } = await supabaseClient.auth.signUp({ email: email, password: password });
+      if (error) { status.textContent = "No se pudo crear la cuenta: " + error.message; return; }
+      if (data.session) {
+        resolveSession(data.session, status);
+      } else {
+        status.textContent = "Cuenta creada. Ahora inicia sesión con ese correo y contraseña.";
+      }
+    });
+
+    supabaseClient.auth.getSession().then(function (res) {
+      const session = res.data && res.data.session;
+      if (session) resolveSession(session, document.getElementById("auth-status"));
     });
   }
 

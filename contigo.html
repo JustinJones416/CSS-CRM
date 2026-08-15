@@ -325,14 +325,19 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   <section class="access-section" id="access">
     <div class="access-card">
       <h2>Accede a tu portal</h2>
-      <p class="sub" id="access-sub">Ingresa tu correo y te enviaremos un enlace de acceso.</p>
+      <p class="sub" id="access-sub">Ingresa tu correo y contraseña.</p>
 
       <div id="auth-supabase" style="display:none;">
         <div class="field">
           <label>Correo electrónico</label>
           <input type="email" id="auth-email" placeholder="tucorreo@ejemplo.com" autocomplete="email">
         </div>
-        <button class="btn btn-primary btn-block" id="btn-send-link">Enviar enlace de acceso</button>
+        <div class="field">
+          <label>Contraseña</label>
+          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-login-pw">Ingresar</button>
+        <button class="btn btn-ghost btn-block" id="btn-signup-pw" style="margin-top:8px;">Crear cuenta con este correo</button>
         <div class="access-hint" id="auth-status"></div>
       </div>
 
@@ -438,12 +443,15 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   }
 
   /* ------------------------------------------------------------
-     Decide qué formulario de acceso mostrar y conecta el flujo de
-     enlace mágico por correo cuando Supabase está configurado.
+     Decide qué formulario de acceso mostrar y conecta el inicio
+     de sesión por correo y contraseña cuando Supabase está
+     configurado. Con "Confirm email" desactivado en el proyecto,
+     tanto iniciar sesión como crear cuenta entran directo, sin
+     ningún correo de por medio.
      Si el proyecto tiene la tabla "patients" con la columna
      patient_user_id vinculada a auth.users (ver supabase/migrations
-     en el repositorio), al volver del enlace de correo se busca
-     automáticamente el expediente correspondiente a esa cuenta.
+     en el repositorio), tras iniciar sesión se busca automáticamente
+     el expediente correspondiente a esa cuenta.
      ------------------------------------------------------------ */
   function initAuth() {
     const supaBlock = document.getElementById("auth-supabase");
@@ -459,33 +467,48 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
     supaBlock.style.display = "block";
     demoBlock.style.display = "none";
-    sub.textContent = "Ingresa tu correo y te enviaremos un enlace de acceso.";
+    sub.textContent = "Ingresa tu correo y contraseña.";
 
-    document.getElementById("btn-send-link").addEventListener("click", async function () {
-      const email = document.getElementById("auth-email").value.trim();
-      const status = document.getElementById("auth-status");
-      if (!email) { status.textContent = "Escribe tu correo para continuar."; return; }
-      status.textContent = "Enviando enlace…";
-      const { error } = await supabaseClient.auth.signInWithOtp({
-        email: email,
-        options: { emailRedirectTo: window.location.href.split("#")[0] }
-      });
-      status.textContent = error
-        ? "No se pudo enviar el enlace. Intenta de nuevo."
-        : "Revisa tu correo y abre el enlace para ingresar.";
-    });
-
-    supabaseClient.auth.getSession().then(async function (res) {
-      const session = res.data && res.data.session;
-      if (!session) return;
+    async function resolveSession(session, status) {
       const { data: patientRow } = await supabaseClient
         .from("patients").select("*").eq("patient_user_id", session.user.id).single();
       if (patientRow) {
         enterPortal(mapSupabasePatient(patientRow));
-      } else {
-        document.getElementById("auth-status").textContent =
-          "Tu cuenta aún no está vinculada a un expediente. Contacta a tu clínica.";
+      } else if (status) {
+        status.textContent = "Tu cuenta aún no está vinculada a un expediente. Contacta a tu clínica.";
       }
+    }
+
+    document.getElementById("btn-login-pw").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const password = document.getElementById("auth-password").value;
+      const status = document.getElementById("auth-status");
+      if (!email || !password) { status.textContent = "Escribe tu correo y contraseña."; return; }
+      status.textContent = "Ingresando…";
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email: email, password: password });
+      if (error) { status.textContent = "Correo o contraseña incorrectos."; return; }
+      resolveSession(data.session, status);
+    });
+
+    document.getElementById("btn-signup-pw").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const password = document.getElementById("auth-password").value;
+      const status = document.getElementById("auth-status");
+      if (!email || !password) { status.textContent = "Escribe tu correo y contraseña."; return; }
+      if (password.length < 6) { status.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+      status.textContent = "Creando cuenta…";
+      const { data, error } = await supabaseClient.auth.signUp({ email: email, password: password });
+      if (error) { status.textContent = "No se pudo crear la cuenta: " + error.message; return; }
+      if (data.session) {
+        resolveSession(data.session, status);
+      } else {
+        status.textContent = "Cuenta creada. Ahora inicia sesión con ese correo y contraseña.";
+      }
+    });
+
+    supabaseClient.auth.getSession().then(function (res) {
+      const session = res.data && res.data.session;
+      if (session) resolveSession(session, document.getElementById("auth-status"));
     });
   }
 
