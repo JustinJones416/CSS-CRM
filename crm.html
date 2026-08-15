@@ -963,24 +963,72 @@ textarea:focus-visible,
     ]);
   }
 
+  /* ============================================================
+     SUPABASE SYNC — Pacientes
+     Patrón: localStorage sigue siendo lo que la interfaz lee al
+     instante. Al iniciar sesión, se descarga todo desde Supabase
+     y se sobrescribe la caché local. Cada creación o edición se
+     empuja a Supabase en segundo plano, sin bloquear la pantalla.
+     Si Supabase no está configurado, este bloque no hace nada y
+     todo sigue funcionando exactamente como en modo demostración.
+     ============================================================ */
+  const PatientSync = {
+    toRow: function (p) {
+      return {
+        id: p.id, nombre: p.nombre, identificacion: p.identificacion, edad: p.edad,
+        telefono: p.telefono, correo: p.correo, estado: p.estado,
+        alergias: p.alergias, medicamentos: p.medicamentos,
+        antecedentes: p.antecedentes, condiciones: p.condiciones
+      };
+    },
+    fromRow: function (row) {
+      return {
+        id: row.id, nombre: row.nombre, identificacion: row.identificacion, edad: row.edad,
+        telefono: row.telefono, correo: row.correo, estado: row.estado,
+        alergias: row.alergias || [], medicamentos: row.medicamentos || [],
+        antecedentes: row.antecedentes || [], condiciones: row.condiciones || [],
+        proximaAtencion: null
+      };
+    },
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("patients").select("*").order("nombre");
+      if (error || !data) return;
+      StorageService.set("patients", data.map(PatientSync.fromRow));
+    },
+    pushCreate: async function (patient) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("patients").insert(PatientSync.toRow(patient));
+    },
+    pushUpdate: async function (id, changes) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("patients").update(changes).eq("id", id);
+    }
+  };
+
   const PatientService = {
     list: function () { return StorageService.get("patients", []); },
     get: function (id) {
       return PatientService.list().filter(function (p) { return p.id === id; })[0] || null;
     },
     create: function (patient) {
-      return StorageService.update("patients", function (list) {
+      const result = StorageService.update("patients", function (list) {
         list = list || [];
         list.push(patient);
         return list;
       }, []);
+      PatientSync.pushCreate(patient);
+      return result;
     },
     update: function (id, changes) {
-      return StorageService.update("patients", function (list) {
+      const result = StorageService.update("patients", function (list) {
         return (list || []).map(function (p) { return p.id === id ? Object.assign({}, p, changes) : p; });
       }, []);
+      PatientSync.pushUpdate(id, changes);
+      return result;
     },
     nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
       const list = PatientService.list();
       const n = list.length + 1;
       return "PAC-" + String(n).padStart(4, "0");
@@ -1467,6 +1515,8 @@ textarea:focus-visible,
       const meta = staffRow && STAFF_ROLE_META[staffRow.role];
       if (meta) {
         enterWithRoleObject({ id: staffRow.role, label: meta.label, initials: meta.initials });
+        await PatientSync.pullAll();
+        if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
       }
@@ -1741,6 +1791,7 @@ textarea:focus-visible,
           '<input type="text" id="patient-search" placeholder="Buscar por nombre o identificación…" style="border:none;outline:none;font-size:13px;width:100%;" value="' + (filterText || "") + '">' +
         '</div>' +
         '<button class="btn btn-primary" id="btn-new-patient">Nuevo paciente</button>' +
+        (supabaseConfigured ? '<button class="btn btn-secondary" id="btn-sync-patients">Sincronizar</button>' : '') +
       '</div>' +
       UI.sectionBlock(
         "Listado de pacientes",
@@ -1752,6 +1803,13 @@ textarea:focus-visible,
       renderPacientes(e.target.value);
     });
     document.getElementById("btn-new-patient").addEventListener("click", openNewPatientModal);
+    const syncBtn = document.getElementById("btn-sync-patients");
+    if (syncBtn) syncBtn.addEventListener("click", async function () {
+      syncBtn.textContent = "Sincronizando…";
+      await PatientSync.pullAll();
+      Toast.show("Lista de pacientes actualizada desde Supabase.", "success");
+      renderPacientes(filterText);
+    });
     Array.prototype.forEach.call(root.querySelectorAll("[data-id]"), function (el) {
       el.addEventListener("click", function () {
         navigateToPatient(el.getAttribute("data-id"));
@@ -3088,7 +3146,7 @@ textarea:focus-visible,
      INICIALIZACIÓN
      ============================================================ */
   function init() {
-    seedPatientData();
+    if (!supabaseConfigured) seedPatientData();
     seedAppointmentData();
     seedMedicationData();
     renderRoleGate();
