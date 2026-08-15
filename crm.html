@@ -1110,6 +1110,34 @@ textarea:focus-visible,
     { id: "aporte_paciente", label: "Aportado por el paciente" }
   ];
 
+  /* ============================================================
+     FOLLOW-UP SERVICE — Seguimiento
+     ============================================================ */
+  const FOLLOWUP_STATUSES = ["Pendiente", "En seguimiento", "Completado", "Cancelado"];
+
+  const FollowUpService = {
+    list: function () { return StorageService.get("followups", []); },
+    byPatient: function (patientId) {
+      return FollowUpService.list().filter(function (f) { return f.patientId === patientId; });
+    },
+    nextId: function () { return "SEG-" + String(FollowUpService.list().length + 1).padStart(4, "0"); },
+    create: function (entry) {
+      return StorageService.update("followups", function (list) {
+        list = list || [];
+        list.push(entry);
+        return list;
+      }, []);
+    },
+    updateEstado: function (id, estado) {
+      return StorageService.update("followups", function (list) {
+        return (list || []).map(function (f) { return f.id === id ? Object.assign({}, f, { estado: estado }) : f; });
+      }, []);
+    },
+    pendingCount: function () {
+      return FollowUpService.list().filter(function (f) { return f.estado === "Pendiente" || f.estado === "En seguimiento"; }).length;
+    }
+  };
+
   const DocumentService = {
     list: function () { return StorageService.get("documents", []); },
     byPatient: function (patientId) {
@@ -1657,7 +1685,7 @@ textarea:focus-visible,
         UI.metricCard("Pacientes pendientes", null, Icons.patients) +
         UI.metricCard("Próximas citas", AppointmentService.upcomingCount() || null, Icons.agenda) +
         UI.metricCard("Preconsultas pendientes", PreconsultaService.pendingCount() || null, Icons.precheck) +
-        UI.metricCard("Seguimientos activos", null, Icons.followup) +
+        UI.metricCard("Seguimientos activos", FollowUpService.pendingCount() || null, Icons.followup) +
       '</div>' +
       UI.sectionBlock(
         "Alertas",
@@ -1950,6 +1978,8 @@ textarea:focus-visible,
       title: "Agregar seguimiento",
       body:
         '<div class="form-field"><label>Motivo</label><input type="text" id="fu-motivo" placeholder="Ej. Control de presión arterial"></div>' +
+        '<div class="form-field"><label>Responsable</label><input type="text" id="fu-responsable" placeholder="Ej. Dr. Torres" value="' + (AppState.currentUser ? AppState.currentUser.label : "") + '"></div>' +
+        '<div class="form-field"><label>Próxima acción</label><input type="text" id="fu-proxima" placeholder="Ej. Llamar en 2 semanas"></div>' +
         '<div class="form-field"><label>Notas</label><textarea id="fu-notas" rows="3" placeholder="Notas del seguimiento"></textarea></div>',
       foot:
         '<button class="btn btn-secondary" id="fu-cancel">Cancelar</button>' +
@@ -1959,7 +1989,16 @@ textarea:focus-visible,
     document.getElementById("fu-save").addEventListener("click", function () {
       const motivo = document.getElementById("fu-motivo").value.trim();
       const notas = document.getElementById("fu-notas").value.trim();
+      const responsable = document.getElementById("fu-responsable").value.trim();
+      const proximaAccion = document.getElementById("fu-proxima").value.trim();
       if (!motivo) { Toast.show("Indica un motivo para el seguimiento.", "danger"); return; }
+      const patient = PatientService.get(patientId);
+      FollowUpService.create({
+        id: FollowUpService.nextId(), patientId: patientId,
+        motivo: motivo, responsable: responsable || "Sin asignar",
+        proximaAccion: proximaAccion || "Sin definir", notas: notas || "Sin notas adicionales",
+        estado: "Pendiente", fecha: new Date().toISOString().slice(0, 10)
+      });
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: patientId, type: "seguimiento",
         title: "Seguimiento: " + motivo,
@@ -1969,7 +2008,7 @@ textarea:focus-visible,
         metadata: {}
       });
       Modal.close();
-      Toast.show("Seguimiento agregado al timeline del paciente.", "success");
+      Toast.show("Seguimiento agregado.", "success");
       renderPatient360(patientId);
     });
   }
@@ -2819,6 +2858,9 @@ textarea:focus-visible,
     const docsByType = DOCUMENT_TYPES.map(function (t) {
       return { label: t.label, value: docs.filter(function (d) { return d.type === t.id; }).length };
     });
+    const followUpsByStatus = FOLLOWUP_STATUSES.map(function (s) {
+      return { label: s, value: FollowUpService.list().filter(function (f) { return f.estado === s; }).length };
+    });
     const completedConsultas = consultas.filter(function (c) { return c.estado === "Completada"; }).length;
 
     root.innerHTML =
@@ -2833,7 +2875,76 @@ textarea:focus-visible,
         '<div>' + barBreakdown("Pacientes por estado", patientsByStatus, "var(--color-primary)") + '</div>' +
         '<div>' + barBreakdown("Citas por estado", apptsByStatus, "var(--color-accent)") + '</div>' +
       '</div>' +
-      barBreakdown("Documentos por tipo", docsByType, "var(--color-primary)");
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" class="p360-grid">' +
+        '<div>' + barBreakdown("Documentos por tipo", docsByType, "var(--color-primary)") + '</div>' +
+        '<div>' + barBreakdown("Seguimientos por estado", followUpsByStatus, "var(--color-accent)") + '</div>' +
+      '</div>';
+  }
+
+  /* ============================================================
+     VISTA: SEGUIMIENTO
+     ============================================================ */
+  function followUpBadgeClass(estado) {
+    if (estado === "Completado") return "badge-success";
+    if (estado === "En seguimiento") return "badge-accent";
+    if (estado === "Cancelado") return "badge-danger";
+    return "badge-warning";
+  }
+
+  function renderSeguimiento(filterEstado) {
+    const root = document.getElementById("view-root");
+    const all = FollowUpService.list().sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+    const filtered = filterEstado ? all.filter(function (f) { return f.estado === filterEstado; }) : all;
+
+    const filterOptions = '<option value="">Todos los estados</option>' +
+      FOLLOWUP_STATUSES.map(function (s) {
+        return '<option value="' + s + '"' + (filterEstado === s ? ' selected' : '') + '>' + s + '</option>';
+      }).join("");
+
+    const rows = filtered.length === 0
+      ? '<tr><td colspan="6" style="padding:0;">' + UI.emptyState(
+          all.length === 0 ? "Sin seguimientos registrados" : "Sin coincidencias",
+          all.length === 0 ? "Los seguimientos creados desde la ficha de un paciente aparecerán aquí." : "Ningún resultado coincide con el filtro seleccionado."
+        ) + '</td></tr>'
+      : filtered.map(function (f) {
+          const pat = PatientService.get(f.patientId);
+          return (
+            '<tr>' +
+              '<td><div style="font-weight:600;">' + (pat ? pat.nombre : f.patientId) + '</div><div style="font-size:11.5px;color:var(--color-text-muted);">' + f.motivo + '</div></td>' +
+              '<td>' + f.responsable + '</td>' +
+              '<td>' + f.proximaAccion + '</td>' +
+              '<td class="mono">' + f.fecha + '</td>' +
+              '<td><span class="badge ' + followUpBadgeClass(f.estado) + '">' + f.estado + '</span></td>' +
+              '<td style="text-align:right;">' +
+                (f.estado !== "Completado" && f.estado !== "Cancelado"
+                  ? '<select class="btn btn-ghost btn-sm" data-status="' + f.id + '" style="border:1px solid var(--color-border);">' +
+                      FOLLOWUP_STATUSES.map(function (s) { return '<option value="' + s + '"' + (f.estado === s ? ' selected' : '') + '>' + s + '</option>'; }).join("") +
+                    '</select>'
+                  : '<span style="color:var(--color-text-faint);font-size:12px;">Cerrado</span>') +
+              '</td>' +
+            '</tr>'
+          );
+        }).join("");
+
+    root.innerHTML =
+      viewHeader("seguimiento") +
+      '<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;">' +
+        '<select id="seg-filter" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:9px 12px;font-size:13px;background:var(--color-surface);color:var(--color-text);">' + filterOptions + '</select>' +
+      '</div>' +
+      UI.sectionBlock(
+        "Seguimientos",
+        '<span class="badge badge-neutral">' + filtered.length + ' de ' + all.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Responsable</th><th>Próxima acción</th><th>Fecha</th><th>Estado</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+      );
+
+    document.getElementById("seg-filter").addEventListener("change", function (e) { renderSeguimiento(e.target.value); });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-status]"), function (sel) {
+      sel.addEventListener("change", function () {
+        FollowUpService.updateEstado(sel.getAttribute("data-status"), sel.value);
+        Toast.show("Estado del seguimiento actualizado.", "success");
+        renderSeguimiento(filterEstado);
+      });
+    });
   }
 
   function renderModuleStub(viewId) {
@@ -2974,6 +3085,7 @@ textarea:focus-visible,
     if (viewId === "medicamentos") return renderMedicamentos();
     if (viewId === "documentos") return renderDocumentos(AppState.docFilterPatient || null);
     if (viewId === "analitica") return renderAnalitica();
+    if (viewId === "seguimiento") return renderSeguimiento();
     return renderModuleStub(viewId);
   }
 
