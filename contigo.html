@@ -645,9 +645,19 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
      entradas (por login o por "atrás") regresa al nivel anterior. */
   window.addEventListener("popstate", function () {
     const hash = window.location.hash;
-    const savedId = sessionStorage.getItem("nexus_contigo_patient");
-    const patients = StorageService.get("patients", []);
-    const patient = patients.filter(function (p) { return p.id === savedId; })[0];
+
+    /* En sesión real de Supabase, el paciente ya está en memoria
+       (currentPatient); en modo de demostración, se reconstruye
+       desde sessionStorage porque no hay sesión de Supabase que
+       consultar. */
+    function resolvePatient() {
+      if (currentPatient) return currentPatient;
+      const savedId = sessionStorage.getItem("nexus_contigo_patient");
+      const patients = StorageService.get("patients", []);
+      return patients.filter(function (p) { return p.id === savedId; })[0] || null;
+    }
+
+    const patient = resolvePatient();
 
     if (hash === "#portal/preconsulta" && patient) {
       currentPatient = patient;
@@ -1062,6 +1072,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   document.addEventListener("DOMContentLoaded", function () {
     initLoginSelect();
     initAuth();
+    /* En modo Supabase, initAuth() ya resuelve la sesión real y
+       restaura #portal por su cuenta; este bloque solo reconstruye
+       la sesión de demostración basada en sessionStorage, para no
+       interferir limpiando el hash mientras Supabase aún resuelve. */
+    if (supabaseConfigured) return;
     const hash = window.location.hash;
     if (hash === "#portal" || hash === "#portal/preconsulta") {
       const savedId = sessionStorage.getItem("nexus_contigo_patient");

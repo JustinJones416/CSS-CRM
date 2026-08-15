@@ -279,22 +279,6 @@ textarea:focus-visible,
 
 .topbar__right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 
-.demo-pill {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--color-warning-soft);
-  color: #92400E;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: .03em;
-  padding: 6px 10px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.demo-pill__dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--color-warning);
-}
-
 .user-chip {
   display: flex; align-items: center; gap: 9px;
   padding: 6px 10px 6px 6px;
@@ -590,7 +574,6 @@ textarea:focus-visible,
 }
 .toast-success { background: var(--color-success); }
 .toast-danger { background: var(--color-danger); }
-.toast-accent { background: var(--color-accent); }
 @media (max-width: 900px) { .p360-grid { grid-template-columns: 1fr !important; } }
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -651,17 +634,6 @@ textarea:focus-visible,
   line-height: 1.6;
 }
 
-.global-demo-banner {
-  display: flex; align-items: center; gap: 8px;
-  background: #0B2B27;
-  color: #9FD4C9;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: .05em;
-  padding: 6px 14px;
-  justify-content: center;
-}
-
 /* ============================================================
    8. RESPONSIVE
    ============================================================ */
@@ -688,7 +660,6 @@ textarea:focus-visible,
   .view { padding: 20px 16px 90px; }
   .table { display: block; overflow-x: auto; white-space: nowrap; }
   .user-chip__meta { display: none; }
-  .demo-pill span.demo-pill__text { display: none; }
   .topbar__search { display: none; }
 }
 
@@ -1589,11 +1560,21 @@ textarea:focus-visible,
     return !allowed || allowed.indexOf(viewId) !== -1;
   }
 
+  function navigateToPatientDocuments(patientId) {
+    AppState.currentView = "documentos";
+    AppState.docFilterPatient = patientId;
+    window.location.hash = "documentos/" + patientId;
+    renderSidebarNav();
+    renderDocumentos(patientId);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
   function navigateTo(viewId) {
     if (!isModuleAllowed(viewId)) {
       Toast.show("Tu rol no tiene acceso a este módulo.", "danger");
       viewId = "dashboard";
     }
+    AppState.docFilterPatient = null;
     AppState.currentView = viewId;
     if (viewId !== "pacientes") AppState.selectedPatient = null;
     else AppState.selectedPatient = null;
@@ -1627,9 +1608,16 @@ textarea:focus-visible,
       AppState.currentView = "consultas";
       renderSidebarNav();
       renderConsultaDetalle(id);
+    } else if (raw.indexOf("documentos/") === 0) {
+      const id = raw.split("/")[1];
+      AppState.currentView = "documentos";
+      AppState.docFilterPatient = id;
+      renderSidebarNav();
+      renderDocumentos(id);
     } else {
       const viewId = VIEW_META[raw] && isModuleAllowed(raw) ? raw : "dashboard";
       AppState.currentView = viewId;
+      AppState.docFilterPatient = null;
       if (viewId !== "pacientes") AppState.selectedPatient = null;
       renderSidebarNav();
       renderView(viewId);
@@ -1821,10 +1809,6 @@ textarea:focus-visible,
     window.scrollTo({ top: 0, behavior: "auto" });
   }
 
-  function pendingActionToast(label) {
-    Toast.show(label + " estará disponible próximamente.", "accent");
-  }
-
   function renderPatient360(id) {
     const root = document.getElementById("view-root");
     const p = PatientService.get(id);
@@ -1835,7 +1819,7 @@ textarea:focus-visible,
       { label: "Nueva preconsulta", handler: function () { startPreconsultaForPatient(p.id); } },
       { label: "Agendar cita", handler: function () { openNewAppointmentModal(p.id); } },
       { label: "Iniciar videoconsulta", handler: function () { navigateTo("consultas"); } },
-      { label: "Ver documentos", handler: function () { AppState.docFilterPatient = p.id; navigateTo("documentos"); } },
+      { label: "Ver documentos", handler: function () { navigateToPatientDocuments(p.id); } },
       { label: "Ver medicamentos", handler: function () { navigateTo("medicamentos"); } },
       { label: "Agregar seguimiento", handler: function () { openAddFollowUpModal(p.id); } }
     ];
@@ -2735,7 +2719,11 @@ textarea:focus-visible,
         '<table class="table"><thead><tr><th>Tipo</th><th>Paciente</th><th>Fecha</th><th>Generado por</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
 
     const clearBtn = document.getElementById("doc-clear-filter");
-    if (clearBtn) clearBtn.addEventListener("click", function () { AppState.docFilterPatient = null; renderDocumentos(null); });
+    if (clearBtn) clearBtn.addEventListener("click", function () {
+      AppState.docFilterPatient = null;
+      window.location.hash = "documentos";
+      renderDocumentos(null);
+    });
     document.getElementById("btn-new-doc").addEventListener("click", function () { openNewDocumentModal(presetPatientId); });
     Array.prototype.forEach.call(root.querySelectorAll("[data-open]"), function (row) {
       row.addEventListener("click", function () { openDocumentViewer(row.getAttribute("data-open")); });
@@ -3116,8 +3104,8 @@ textarea:focus-visible,
         document.getElementById("user-avatar").textContent = savedSession.initials;
         document.getElementById("user-role-label").textContent = savedSession.label;
         renderSidebarNav();
-        const hashView = window.location.hash.replace("#", "");
-        navigateTo(VIEW_META[hashView] ? hashView : "dashboard");
+        if (window.location.hash) handleBrowserNavigation();
+        else navigateTo("dashboard");
       }
     }
   }
