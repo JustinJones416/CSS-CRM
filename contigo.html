@@ -328,16 +328,28 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       <p class="sub" id="access-sub">Ingresa tu correo y contraseña.</p>
 
       <div id="auth-supabase" style="display:none;">
-        <div class="field">
-          <label>Correo electrónico</label>
-          <input type="email" id="auth-email" placeholder="tucorreo@ejemplo.com" autocomplete="email">
+        <div id="auth-login-block">
+          <div class="field">
+            <label>Correo electrónico</label>
+            <input type="email" id="auth-email" placeholder="tucorreo@ejemplo.com" autocomplete="email">
+          </div>
+          <div class="field">
+            <label>Contraseña</label>
+            <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-login-pw">Ingresar</button>
+          <button class="btn btn-ghost btn-block" id="btn-signup-pw" style="margin-top:8px;">Crear cuenta con este correo</button>
+          <button class="btn btn-ghost btn-block" id="btn-forgot-pw" style="margin-top:2px;font-size:12.5px;">¿Olvidaste tu contraseña?</button>
         </div>
-        <div class="field">
-          <label>Contraseña</label>
-          <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
+
+        <div id="auth-reset-block" style="display:none;">
+          <div class="field">
+            <label>Nueva contraseña</label>
+            <input type="password" id="auth-new-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-set-new-password">Guardar nueva contraseña</button>
         </div>
-        <button class="btn btn-primary btn-block" id="btn-login-pw">Ingresar</button>
-        <button class="btn btn-ghost btn-block" id="btn-signup-pw" style="margin-top:8px;">Crear cuenta con este correo</button>
+
         <div class="access-hint" id="auth-status"></div>
       </div>
 
@@ -498,11 +510,56 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       if (password.length < 6) { status.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
       status.textContent = "Creando cuenta…";
       const { data, error } = await supabaseClient.auth.signUp({ email: email, password: password });
-      if (error) { status.textContent = "No se pudo crear la cuenta: " + error.message; return; }
+      if (error) {
+        status.textContent = /registered|existe/i.test(error.message)
+          ? "Ese correo ya tiene una cuenta. Usa \"¿Olvidaste tu contraseña?\" para acceder."
+          : "No se pudo crear la cuenta: " + error.message;
+        return;
+      }
       if (data.session) {
         resolveSession(data.session, status);
+      } else if (data.user && data.user.identities && data.user.identities.length === 0) {
+        status.textContent = "Ese correo ya tiene una cuenta. Usa \"¿Olvidaste tu contraseña?\" para acceder.";
       } else {
         status.textContent = "Cuenta creada. Ahora inicia sesión con ese correo y contraseña.";
+      }
+    });
+
+    document.getElementById("btn-forgot-pw").addEventListener("click", async function () {
+      const email = document.getElementById("auth-email").value.trim();
+      const status = document.getElementById("auth-status");
+      if (!email) { status.textContent = "Escribe tu correo arriba y presiona este botón de nuevo."; return; }
+      status.textContent = "Enviando enlace para restablecer tu contraseña…";
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.href.split("#")[0]
+      });
+      status.textContent = error
+        ? "No se pudo enviar el enlace. Intenta de nuevo."
+        : "Revisa tu correo y abre el enlace para crear una nueva contraseña.";
+    });
+
+    document.getElementById("btn-set-new-password").addEventListener("click", async function () {
+      const newPassword = document.getElementById("auth-new-password").value;
+      const status = document.getElementById("auth-status");
+      if (!newPassword || newPassword.length < 6) { status.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+      status.textContent = "Guardando…";
+      const { data, error } = await supabaseClient.auth.updateUser({ password: newPassword });
+      if (error) { status.textContent = "No se pudo guardar la contraseña. Intenta de nuevo."; return; }
+      status.textContent = "Contraseña actualizada. Ingresando…";
+      document.getElementById("auth-reset-block").style.display = "none";
+      document.getElementById("auth-login-block").style.display = "block";
+      resolveSession(data.user ? (await supabaseClient.auth.getSession()).data.session : null, status);
+    });
+
+    /* Cuando alguien abre el enlace de "olvidé mi contraseña" desde su
+       correo, Supabase dispara este evento en vez de iniciar sesión
+       normal, así mostramos el formulario de nueva contraseña en lugar
+       de intentar entrar directo al portal. */
+    supabaseClient.auth.onAuthStateChange(function (event) {
+      if (event === "PASSWORD_RECOVERY") {
+        document.getElementById("auth-login-block").style.display = "none";
+        document.getElementById("auth-reset-block").style.display = "block";
+        document.getElementById("auth-status").textContent = "Escribe tu nueva contraseña.";
       }
     });
 
