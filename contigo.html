@@ -137,6 +137,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   input[type="range"] { height: 44px; }
   .tag-input-row { flex-direction: column; }
   .tag-input-row .btn-sm { width: 100%; }
+  .p-list-item { flex-wrap: wrap; }
 }
 
 /* ---- Cómo funciona ---- */
@@ -526,6 +527,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       if (patientRow) {
         const patient = mapSupabasePatient(patientRow);
         await pullOwnDocuments(patient.id);
+        await pullOwnAppointments(patient.id);
         enterPortal(patient);
       } else if (status) {
         status.textContent = "Tu cuenta aún no está vinculada a un expediente. Contacta a tu clínica.";
@@ -539,7 +541,21 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         return {
           id: row.id, patientId: row.patient_id, patientName: currentPatient ? currentPatient.nombre : "",
           type: row.type, contenido: row.contenido, autor: row.autor,
-          origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10)
+          origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10),
+          filePath: row.file_path || null
+        };
+      }));
+    }
+
+    async function pullOwnAppointments(patientId) {
+      const { data, error } = await supabaseClient.from("appointments").select("*, doctors(nombre)").eq("patient_id", patientId);
+      if (error || !data) return;
+      StorageService.set("appointments", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, patientName: currentPatient ? currentPatient.nombre : "",
+          doctorId: row.doctor_id, doctorName: (row.doctors && row.doctors.nombre) || "Médico",
+          especialidad: row.especialidad, modalidad: row.modalidad,
+          fecha: row.fecha, hora: (row.hora || "").slice(0, 5), estado: row.estado
         };
       }));
     }
@@ -777,9 +793,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
             (appts.length === 0
               ? '<div class="p-empty">Aún no tienes citas registradas.</div>'
               : appts.slice(0, 6).map(function (a) {
-                  return '<div class="p-list-item">' +
+                  const cancelable = ["Programada", "Confirmada"].indexOf(a.estado) !== -1;
+                  return '<div class="p-list-item" style="align-items:flex-start;">' +
                     '<div><div class="p-list-item__title">' + a.doctorName + '</div><div class="p-list-item__sub">' + a.especialidad + ' · ' + formatFecha(a.fecha) + ' · ' + a.hora + ' · ' + a.modalidad + '</div></div>' +
-                    '<span class="p-badge ' + statusBadge(a.estado) + '">' + a.estado + '</span>' +
+                    '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">' +
+                      '<span class="p-badge ' + statusBadge(a.estado) + '">' + a.estado + '</span>' +
+                      (cancelable && supabaseConfigured ? '<button class="btn btn-ghost btn-sm" data-cancel-appt="' + a.id + '" style="color:var(--color-danger);padding:4px 8px;font-size:11.5px;">Cancelar</button>' : '') +
+                    '</div>' +
                   '</div>';
                 }).join("")) +
           '</div>' +
@@ -854,6 +874,29 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       });
     });
     document.getElementById("btn-upload-doc").addEventListener("click", openUploadDocModal);
+    Array.prototype.forEach.call(main.querySelectorAll("[data-cancel-appt]"), function (btn) {
+      btn.addEventListener("click", async function () {
+        if (!window.confirm("¿Seguro que quieres cancelar esta cita?")) return;
+        const apptId = btn.getAttribute("data-cancel-appt");
+        btn.textContent = "Cancelando…";
+        btn.disabled = true;
+        const { error } = await supabaseClient.rpc("cancel_own_appointment", { appt_id: apptId });
+        if (error) {
+          Toast_showLocal("No se pudo cancelar. Intenta de nuevo.");
+          btn.textContent = "Cancelar";
+          btn.disabled = false;
+          return;
+        }
+        const list = StorageService.get("appointments", []).map(function (a) {
+          return a.id === apptId ? Object.assign({}, a, { estado: "Cancelada" }) : a;
+        });
+        StorageService.set("appointments", list);
+        const cancelled = list.filter(function (a) { return a.id === apptId; })[0];
+        pushTimelineEvent({ patientId: p.id, type: "cita", title: "Cita cancelada por el paciente", description: cancelled ? (cancelled.doctorName + " · " + cancelled.fecha) : "", actor: p.nombre });
+        Toast_showLocal("Cita cancelada.");
+        renderPortal();
+      });
+    });
     document.getElementById("qa-preconsulta").addEventListener("click", function () {
       window.location.hash = "portal/preconsulta";
       renderPreconsultaScreen();
@@ -1037,6 +1080,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       const tl = StorageService.get("timeline", []);
       tl.push({ id: "TL-" + Date.now(), patientId: p.id, type: "preconsulta", title: "Preconsulta enviada por el paciente", description: "Motivo: " + motivo, date: new Date().toISOString().slice(0, 10), actor: p.nombre, metadata: {} });
       StorageService.set("timeline", tl);
+      pushTimelineEvent({ patientId: p.id, type: "preconsulta", title: "Preconsulta enviada por el paciente", description: "Motivo: " + motivo, actor: p.nombre });
       if (supabaseConfigured) {
         const toArr = function (v) { return Array.isArray(v) ? v : (v ? [v] : []); };
         await supabaseClient.from("preconsultas").insert({
@@ -1048,6 +1092,16 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         });
       }
       window.history.back();
+    });
+  }
+
+  /* Envía un evento al historial global (timeline_events), visible
+     para el personal en Nexus Clinical → Analítica. */
+  async function pushTimelineEvent(entry) {
+    if (!supabaseConfigured) return;
+    await supabaseClient.from("timeline_events").insert({
+      patient_id: entry.patientId, type: entry.type, title: entry.title,
+      description: entry.description, actor: entry.actor
     });
   }
 
@@ -1139,6 +1193,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         StorageService.set("appointments", list.concat([appt]));
       }
 
+      pushTimelineEvent({ patientId: p.id, type: "cita", title: "Cita agendada por el paciente", description: doctorName + " · " + especialidad + " · " + fecha + " " + hora, actor: p.nombre });
       window.history.back();
     });
   }
@@ -1166,33 +1221,61 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
      que queda visible para el equipo clínico en Nexus Clinical,
      marcada con origen "paciente".
      ------------------------------------------------------------ */
+  const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB, límite estándar
+
   function openUploadDocModal() {
     openModal(
       "Aportar documento",
       '<div class="field"><label>Descripción</label><input type="text" id="ud-desc" placeholder="Ej. Resultado de laboratorio externo"></div>' +
       '<div class="field"><label>Detalle</label><input type="text" id="ud-detalle" placeholder="Notas adicionales sobre el documento"></div>' +
+      '<div class="field"><label>Archivo (PDF, máximo 10 MB)</label><input type="file" id="ud-file" accept="application/pdf"></div>' +
       '<p style="font-size:11.5px;color:var(--color-text-faint);">Este documento queda visible para tu equipo médico dentro de tu expediente.</p>',
       '<button class="btn btn-primary btn-block" id="ud-submit">Enviar</button>'
     );
     document.getElementById("ud-submit").addEventListener("click", async function () {
       const desc = document.getElementById("ud-desc").value.trim();
       if (!desc) return;
+      const fileInput = document.getElementById("ud-file");
+      const file = fileInput.files[0];
+      const submitBtn = document.getElementById("ud-submit");
+
+      if (file) {
+        if (file.type !== "application/pdf") { Toast_showLocal("Solo se aceptan archivos PDF."); return; }
+        if (file.size > DOCUMENT_MAX_BYTES) { Toast_showLocal("El archivo supera el límite de 10 MB."); return; }
+      }
+
       const p = currentPatient;
       const docs = StorageService.get("documents", []);
       const doc = {
         id: (supabaseConfigured && window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : "DOC-" + String(docs.length + 1).padStart(4, "0"),
         patientId: p.id, patientName: p.nombre, type: "aporte_paciente",
         contenido: desc + (document.getElementById("ud-detalle").value.trim() ? " — " + document.getElementById("ud-detalle").value.trim() : ""),
-        fecha: new Date().toISOString().slice(0, 10), autor: p.nombre, origen: "paciente"
+        fecha: new Date().toISOString().slice(0, 10), autor: p.nombre, origen: "paciente", filePath: null
       };
+
+      if (supabaseConfigured && file) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Subiendo archivo…";
+        const path = p.id + "/" + Date.now() + "-" + file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const { error: uploadError } = await supabaseClient.storage.from("documents").upload(path, file, { contentType: "application/pdf" });
+        if (uploadError) {
+          Toast_showLocal("No se pudo subir el archivo. Intenta de nuevo.");
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Enviar";
+          return;
+        }
+        doc.filePath = path;
+      }
+
       StorageService.set("documents", docs.concat([doc]));
       const tl = StorageService.get("timeline", []);
       tl.push({ id: "TL-" + Date.now(), patientId: p.id, type: "documento", title: "Documento aportado por el paciente", description: desc, date: new Date().toISOString().slice(0, 10), actor: p.nombre, metadata: {} });
       StorageService.set("timeline", tl);
+      pushTimelineEvent({ patientId: p.id, type: "documento", title: "Documento aportado por el paciente", description: desc, actor: p.nombre });
       if (supabaseConfigured) {
         await supabaseClient.from("documents").insert({
           id: doc.id, patient_id: doc.patientId, type: doc.type,
-          contenido: doc.contenido, autor: doc.autor, origen: "paciente"
+          contenido: doc.contenido, autor: doc.autor, origen: "paciente", file_path: doc.filePath
         });
       }
       document.getElementById("modal-overlay").classList.remove("active");
@@ -1211,7 +1294,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     return parts[2] + " " + meses[parseInt(parts[1], 10) - 1] + " " + parts[0];
   }
 
-  function openDocViewer(id) {
+  async function openDocViewer(id) {
     const d = StorageService.get("documents", []).filter(function (x) { return x.id === id; })[0];
     if (!d) return;
     openModal(
@@ -1219,10 +1302,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       '<div style="border:1px solid var(--color-border);border-radius:12px;padding:18px;">' +
         '<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:10px;">' + formatFecha(d.fecha) + ' · ' + d.autor + '</div>' +
         '<p style="font-size:13.5px;line-height:1.6;white-space:pre-wrap;">' + d.contenido + '</p>' +
+        (d.filePath ? '<div id="doc-file-link" style="margin-top:10px;font-size:12.5px;color:var(--color-text-muted);">Cargando archivo adjunto…</div>' : '') +
         '<div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--color-border);font-size:11px;color:var(--color-danger);text-align:center;">REQUIERE FIRMA DEL PROFESIONAL PARA VALIDEZ OFICIAL</div>' +
       '</div>',
       '<button class="btn btn-primary btn-block" onclick="document.getElementById(\'modal-overlay\').classList.remove(\'active\')">Cerrar</button>'
     );
+    if (d.filePath && supabaseConfigured) {
+      const { data } = await supabaseClient.storage.from("documents").createSignedUrl(d.filePath, 300);
+      const linkEl = document.getElementById("doc-file-link");
+      if (linkEl) {
+        linkEl.innerHTML = data && data.signedUrl
+          ? '<a href="' + data.signedUrl + '" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Descargar PDF adjunto</a>'
+          : 'No se pudo cargar el archivo adjunto.';
+      }
+    }
   }
 
   function openModal(title, body, foot) {
