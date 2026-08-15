@@ -246,7 +246,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .p-badge-info { background: var(--color-primary-soft); color: var(--color-primary-dark); }
 .p-badge-danger { background: #FEE2E2; color: #991B1B; }
 
-.quick-actions { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 20px; }
+.quick-actions { display: grid; grid-template-columns: repeat(5,1fr); gap: 10px; margin-bottom: 20px; }
 .quick-action {
   background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md);
   padding: 16px 12px; text-align: center; transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
@@ -255,6 +255,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .quick-action__icon { width: 34px; height: 34px; border-radius: 10px; background: var(--color-primary-soft); color: var(--color-primary-dark); display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; }
 .quick-action__icon svg { width: 16px; height: 16px; }
 .quick-action span { font-size: 12px; font-weight: 600; }
+@media (max-width: 900px) { .quick-actions { grid-template-columns: repeat(3,1fr); } }
 @media (max-width: 560px) { .quick-actions { grid-template-columns: 1fr 1fr; } }
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
@@ -708,6 +709,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       renderPreconsultaScreen();
       return;
     }
+    if (hash === "#portal/agendar" && patient) {
+      currentPatient = patient;
+      document.getElementById("public-site").style.display = "none";
+      document.getElementById("portal-shell").classList.add("active");
+      renderAgendarScreen();
+      return;
+    }
     if (hash === "#portal" && patient) { enterPortal(patient); return; }
     exitPortal();
   });
@@ -755,6 +763,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           '</div>') +
 
       '<div class="quick-actions">' +
+        '<div class="quick-action" id="qa-agendar" style="cursor:pointer;"><div class="quick-action__icon">' + Icons.calendar + '</div><span>Agendar cita</span></div>' +
         '<div class="quick-action" data-scroll="card-citas" style="cursor:pointer;"><div class="quick-action__icon">' + Icons.calendar + '</div><span>Mis citas</span></div>' +
         '<div class="quick-action" data-scroll="card-medicamentos" style="cursor:pointer;"><div class="quick-action__icon">' + Icons.pill + '</div><span>Medicamentos</span></div>' +
         '<div class="quick-action" data-scroll="card-documentos" style="cursor:pointer;"><div class="quick-action__icon">' + Icons.doc + '</div><span>Documentos</span></div>' +
@@ -848,6 +857,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     document.getElementById("qa-preconsulta").addEventListener("click", function () {
       window.location.hash = "portal/preconsulta";
       renderPreconsultaScreen();
+      window.scrollTo({ top: 0 });
+    });
+    document.getElementById("qa-agendar").addEventListener("click", function () {
+      window.location.hash = "portal/agendar";
+      renderAgendarScreen();
       window.scrollTo({ top: 0 });
     });
     const joinBtn = document.getElementById("join-video");
@@ -1053,6 +1067,101 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   }
 
   /* ------------------------------------------------------------
+     Agendar cita — pantalla propia dentro del portal (mismo
+     motivo que la preconsulta: nada de modales para formularios
+     con datos). Escribe directo en la misma tabla "appointments"
+     que usa Nexus Clinical, con estado "Programada", para que el
+     equipo la vea de inmediato sin depender del navegador.
+     ------------------------------------------------------------ */
+  async function renderAgendarScreen() {
+    const main = document.getElementById("portal-main");
+    main.innerHTML =
+      '<button class="btn btn-ghost" id="ag-cancel" style="padding-left:0;margin-bottom:14px;">← Cancelar y volver</button>' +
+      '<div class="portal-greeting" style="font-size:22px;">Agenda tu cita</div>' +
+      '<div class="portal-sub">Elige médico, modalidad, fecha y hora.</div>' +
+      '<div class="p-card" id="ag-form-card">' +
+        '<div style="text-align:center;padding:20px 0;color:var(--color-text-muted);font-size:13px;">Cargando médicos disponibles…</div>' +
+      '</div>';
+
+    document.getElementById("ag-cancel").addEventListener("click", function () { window.history.back(); });
+
+    const doctors = await loadDoctorsForBooking();
+    const card = document.getElementById("ag-form-card");
+    if (doctors.length === 0) {
+      card.innerHTML = '<div class="p-empty">No hay médicos disponibles para agendar en este momento.</div>';
+      return;
+    }
+
+    card.innerHTML =
+      '<div class="field"><label>Médico</label><select id="ag-doctor">' +
+        doctors.map(function (d) { return '<option value="' + d.id + '" data-esp="' + d.especialidad + '">' + d.nombre + ' — ' + d.especialidad + '</option>'; }).join("") +
+      '</select></div>' +
+      '<div class="field"><label>Modalidad</label><select id="ag-modalidad"><option>Presencial</option><option>Virtual</option></select></div>' +
+      '<div class="field"><label>Fecha</label><input type="date" id="ag-fecha" min="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+      '<div class="field"><label>Hora</label><input type="time" id="ag-hora"></div>' +
+      '<button class="btn btn-primary btn-block" id="ag-submit" style="margin-top:8px;">Confirmar cita</button>';
+
+    document.getElementById("ag-submit").addEventListener("click", async function () {
+      const doctorSelect = document.getElementById("ag-doctor");
+      const doctorId = doctorSelect.value;
+      const especialidad = doctorSelect.selectedOptions[0].getAttribute("data-esp");
+      const doctorName = doctorSelect.selectedOptions[0].textContent.split(" — ")[0];
+      const modalidad = document.getElementById("ag-modalidad").value;
+      const fecha = document.getElementById("ag-fecha").value;
+      const hora = document.getElementById("ag-hora").value;
+      const submitBtn = document.getElementById("ag-submit");
+      if (!fecha || !hora) { Toast_showLocal("Selecciona fecha y hora."); return; }
+
+      const p = currentPatient;
+      const appt = {
+        id: (supabaseConfigured && window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : "CITA-" + Date.now(),
+        patientId: p.id, patientName: p.nombre, doctorId: doctorId, doctorName: doctorName,
+        especialidad: especialidad, modalidad: modalidad, fecha: fecha, hora: hora, estado: "Programada"
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Guardando…";
+
+      if (supabaseConfigured) {
+        const { error } = await supabaseClient.from("appointments").insert({
+          id: appt.id, patient_id: appt.patientId, doctor_id: appt.doctorId,
+          especialidad: appt.especialidad, modalidad: appt.modalidad,
+          fecha: appt.fecha, hora: appt.hora, estado: appt.estado
+        });
+        if (error) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Confirmar cita";
+          Toast_showLocal("No se pudo agendar la cita. Intenta de nuevo.");
+          return;
+        }
+      } else {
+        const list = StorageService.get("appointments", []);
+        StorageService.set("appointments", list.concat([appt]));
+      }
+
+      window.history.back();
+    });
+  }
+
+  async function loadDoctorsForBooking() {
+    if (supabaseConfigured) {
+      const { data, error } = await supabaseClient.from("doctors").select("*").order("nombre");
+      if (!error && data) return data;
+    }
+    return StorageService.get("doctors", []);
+  }
+
+  /* Aviso breve reutilizando el mismo estilo del portal, sin
+     depender del modal (aquí no hay overlay que anclar). */
+  function Toast_showLocal(msg) {
+    const el = document.createElement("div");
+    el.textContent = msg;
+    el.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--color-text);color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;z-index:300;box-shadow:var(--shadow-md);";
+    document.body.appendChild(el);
+    window.setTimeout(function () { el.remove(); }, 2600);
+  }
+
+  /* ------------------------------------------------------------
      Aportar documento — el paciente sube una referencia (texto)
      que queda visible para el equipo clínico en Nexus Clinical,
      marcada con origen "paciente".
@@ -1136,7 +1245,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
        interferir limpiando el hash mientras Supabase aún resuelve. */
     if (supabaseConfigured) return;
     const hash = window.location.hash;
-    if (hash === "#portal" || hash === "#portal/preconsulta") {
+    if (hash === "#portal" || hash === "#portal/preconsulta" || hash === "#portal/agendar") {
       const savedId = sessionStorage.getItem("nexus_contigo_patient");
       const patients = StorageService.get("patients", []);
       const patient = patients.filter(function (p) { return p.id === savedId; })[0];
@@ -1145,6 +1254,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         document.getElementById("public-site").style.display = "none";
         document.getElementById("portal-shell").classList.add("active");
         if (hash === "#portal/preconsulta") renderPreconsultaScreen();
+        else if (hash === "#portal/agendar") renderAgendarScreen();
         else renderPortal();
       } else {
         window.location.hash = "";
