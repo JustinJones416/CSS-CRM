@@ -814,22 +814,23 @@ textarea:focus-visible,
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
-  /* Los proyectos de Supabase creados recientemente usan el flujo
-     PKCE para los enlaces de correo: la URL de retorno trae "?code=..."
-     en vez del token clásico en el hash. Este bloque se resuelve
-     apenas carga la página, sin esperar a DOMContentLoaded, para no
-     perder el evento de recuperación de contraseña por una carrera
-     de tiempos. isPasswordRecovery queda disponible para initAuth(). */
-  let isPasswordRecovery = false;
+  /* Los proyectos de Supabase usan distintos formatos de enlace
+     según su configuración (token clásico en el hash, o código PKCE
+     en la URL). En vez de depender de que el evento PASSWORD_RECOVERY
+     se dispare a tiempo, se revisa la URL directamente: si contiene
+     "type=recovery" en cualquier parte (query o hash), es un enlace
+     de recuperación, sin importar el formato. Esto se resuelve apenas
+     carga la página, antes de DOMContentLoaded, para no perder la
+     carrera de tiempos. isPasswordRecovery queda disponible para
+     initAuth(). */
+  let isPasswordRecovery = window.location.href.indexOf("type=recovery") !== -1;
   let authBootstrap = Promise.resolve();
   if (supabaseConfigured) {
     supabaseClient.auth.onAuthStateChange(function (event) {
       if (event === "PASSWORD_RECOVERY") isPasswordRecovery = true;
     });
     if (window.location.href.indexOf("code=") !== -1) {
-      authBootstrap = supabaseClient.auth.exchangeCodeForSession(window.location.href).then(function () {
-        if (window.location.href.indexOf("type=recovery") !== -1) isPasswordRecovery = true;
-      }).catch(function () {});
+      authBootstrap = supabaseClient.auth.exchangeCodeForSession(window.location.href).catch(function () {});
     }
   }
 
