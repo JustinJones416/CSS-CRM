@@ -347,7 +347,12 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
             <label>Nueva contraseña</label>
             <input type="password" id="auth-new-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
           </div>
+          <div class="field">
+            <label>Confirma la nueva contraseña</label>
+            <input type="password" id="auth-new-password-confirm" placeholder="Repite la contraseña" autocomplete="new-password">
+          </div>
           <button class="btn btn-primary btn-block" id="btn-set-new-password">Guardar nueva contraseña</button>
+          <button class="btn btn-ghost btn-block" id="btn-cancel-reset" style="margin-top:6px;font-size:12.5px;">Cancelar y volver al inicio de sesión</button>
         </div>
 
         <div class="access-hint" id="auth-status"></div>
@@ -587,15 +592,32 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
     document.getElementById("btn-set-new-password").addEventListener("click", async function () {
       const newPassword = document.getElementById("auth-new-password").value;
+      const confirmPassword = document.getElementById("auth-new-password-confirm").value;
       const status = document.getElementById("auth-status");
       if (!newPassword || newPassword.length < 6) { status.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+      if (newPassword !== confirmPassword) { status.textContent = "Las dos contraseñas no coinciden."; return; }
       status.textContent = "Guardando…";
-      const { data, error } = await supabaseClient.auth.updateUser({ password: newPassword });
-      if (error) { status.textContent = "No se pudo guardar la contraseña. Intenta de nuevo."; return; }
+      const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+      if (error) {
+        status.textContent = /expired|invalid|session/i.test(error.message)
+          ? "Este enlace ya expiró o ya se usó. Pide uno nuevo con \"¿Olvidaste tu contraseña?\"."
+          : "No se pudo guardar la contraseña: " + error.message;
+        return;
+      }
       status.textContent = "Contraseña actualizada. Ingresando…";
       document.getElementById("auth-reset-block").style.display = "none";
       document.getElementById("auth-login-block").style.display = "block";
-      resolveSession(data.user ? (await supabaseClient.auth.getSession()).data.session : null, status);
+      const res = await supabaseClient.auth.getSession();
+      if (res.data.session) resolveSession(res.data.session, status);
+    });
+
+    document.getElementById("btn-cancel-reset").addEventListener("click", async function () {
+      isPasswordRecovery = false;
+      await supabaseClient.auth.signOut();
+      document.getElementById("auth-reset-block").style.display = "none";
+      document.getElementById("auth-login-block").style.display = "block";
+      document.getElementById("auth-status").textContent = "";
+      window.history.replaceState(null, "", window.location.pathname);
     });
 
     /* El registro temprano de PASSWORD_RECOVERY (arriba, antes de
