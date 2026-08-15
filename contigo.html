@@ -131,6 +131,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   .wrap, .hero, .steps, .access-section { padding-left: 16px; padding-right: 16px; }
   .access-card { padding: 26px 22px; }
   .portal-topbar__inner { padding: 0 2px; }
+  .p-card [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; gap: 0 !important; }
+  input[type="range"] { height: 44px; }
 }
 
 /* ---- Cómo funciona ---- */
@@ -415,15 +417,23 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   });
 
   /* Soporte de botón atrás/adelante del navegador: entrar al portal
-     agrega la entrada #portal al historial; salir de esa entrada
-     (por login o por "atrás") debe regresar siempre al sitio público. */
+     agrega la entrada #portal al historial; entrar a la preconsulta
+     agrega #portal/preconsulta encima. Salir de cualquiera de esas
+     entradas (por login o por "atrás") regresa al nivel anterior. */
   window.addEventListener("popstate", function () {
-    if (window.location.hash === "#portal") {
-      const savedId = sessionStorage.getItem("nexus_contigo_patient");
-      const patients = StorageService.get("patients", []);
-      const patient = patients.filter(function (p) { return p.id === savedId; })[0];
-      if (patient) { enterPortal(patient); return; }
+    const hash = window.location.hash;
+    const savedId = sessionStorage.getItem("nexus_contigo_patient");
+    const patients = StorageService.get("patients", []);
+    const patient = patients.filter(function (p) { return p.id === savedId; })[0];
+
+    if (hash === "#portal/preconsulta" && patient) {
+      currentPatient = patient;
+      document.getElementById("public-site").style.display = "none";
+      document.getElementById("portal-shell").classList.add("active");
+      renderPreconsultaScreen();
+      return;
     }
+    if (hash === "#portal" && patient) { enterPortal(patient); return; }
     exitPortal();
   });
 
@@ -560,7 +570,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       });
     });
     document.getElementById("btn-upload-doc").addEventListener("click", openUploadDocModal);
-    document.getElementById("qa-preconsulta").addEventListener("click", openPreconsultaModal);
+    document.getElementById("qa-preconsulta").addEventListener("click", function () {
+      window.location.hash = "portal/preconsulta";
+      renderPreconsultaScreen();
+      window.scrollTo({ top: 0 });
+    });
     const joinBtn = document.getElementById("join-video");
     if (joinBtn) joinBtn.addEventListener("click", function () {
       openModal("Videollamada", '<div style="text-align:center;padding:16px 4px;"><p style="font-size:13px;color:var(--color-text-muted);margin-bottom:10px;">Vista previa de la videollamada.</p><span class="p-badge p-badge-warn">AÚN NO CONECTADA A UN PROVEEDOR</span></div>', '<button class="btn btn-primary btn-block" onclick="document.getElementById(\'modal-overlay\').classList.remove(\'active\')">Cerrar</button>');
@@ -568,23 +582,61 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   }
 
   /* ------------------------------------------------------------
-     Preconsulta desde el portal — escribe en las mismas claves
-     (preconsultas, timeline) que usa Nexus Clinical, marcada con
-     origen "paciente" para que el equipo clínico sepa que llegó
-     por autoservicio y no fue creada por personal.
+     Preconsulta desde el portal — pantalla propia dentro del
+     portal (no modal), para que un toque accidental fuera del
+     área de contenido nunca borre lo que el paciente ya escribió.
+     Escribe en las mismas claves (preconsultas, timeline) que usa
+     Nexus Clinical, marcada con origen "paciente".
      ------------------------------------------------------------ */
-  function openPreconsultaModal() {
-    openModal(
-      "Nueva preconsulta",
-      '<div class="field"><label>Motivo de consulta</label><input type="text" id="pc-motivo" placeholder="Ej. Dolor de cabeza persistente"></div>' +
-      '<div class="field"><label>Síntomas</label><input type="text" id="pc-sintomas" placeholder="Describe brevemente tus síntomas"></div>' +
-      '<div class="field"><label>Duración</label><input type="text" id="pc-duracion" placeholder="Ej. 3 días"></div>' +
-      '<div class="field"><label>Intensidad (1 a 10)</label><input type="number" id="pc-intensidad" min="1" max="10" value="5"></div>',
-      '<button class="btn btn-primary btn-block" id="pc-submit">Enviar a mi equipo médico</button>'
-    );
+  function renderPreconsultaScreen() {
+    const main = document.getElementById("portal-main");
+    main.innerHTML =
+      '<button class="btn btn-ghost" id="pc-cancel" style="padding-left:0;margin-bottom:14px;">← Cancelar y volver</button>' +
+      '<div class="portal-greeting" style="font-size:22px;">Cuéntanos qué sientes</div>' +
+      '<div class="portal-sub">Esta información llega directo a tu equipo médico antes de tu consulta.</div>' +
+
+      '<div class="p-card">' +
+        '<h3>Motivo de consulta</h3>' +
+        '<div class="field"><input type="text" id="pc-motivo" placeholder="Ej. Dolor de cabeza persistente"></div>' +
+
+        '<h3 style="margin-top:6px;">Síntomas</h3>' +
+        '<div class="field"><textarea id="pc-sintomas" rows="3" placeholder="Describe con tus palabras lo que sientes" style="width:100%;border:1.5px solid var(--color-border);border-radius:var(--radius-md);padding:13px 14px;font-family:inherit;font-size:15.5px;resize:vertical;"></textarea></div>' +
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
+          '<div class="field"><label>Duración</label><input type="text" id="pc-duracion" placeholder="Ej. 3 días"></div>' +
+          '<div class="field"><label>Antecedentes</label><input type="text" id="pc-antecedentes" placeholder="Ej. Hipertensión"></div>' +
+        '</div>' +
+
+        '<div class="field">' +
+          '<label>Intensidad</label>' +
+          '<div style="display:flex;align-items:center;gap:14px;">' +
+            '<input type="range" id="pc-intensidad" min="1" max="10" value="5" style="flex:1;accent-color:var(--color-primary);height:36px;">' +
+            '<span id="pc-intensidad-value" class="mono" style="font-weight:700;font-size:18px;min-width:28px;text-align:center;">5</span>' +
+          '</div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-text-faint);margin-top:2px;">' +
+            '<span>Leve</span><span>Moderado</span><span>Intenso</span>' +
+          '</div>' +
+        '</div>' +
+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">' +
+          '<div class="field"><label>Medicamentos actuales</label><input type="text" id="pc-medicamentos" placeholder="Ej. Losartán 50 mg"></div>' +
+          '<div class="field"><label>Alergias</label><input type="text" id="pc-alergias" placeholder="Ej. Penicilina"></div>' +
+        '</div>' +
+
+        '<div class="field" style="margin-bottom:6px;"><label>Archivos o fotos (opcional)</label><input type="text" id="pc-archivos" placeholder="Nombre del archivo que le mostrarás a tu médico"></div>' +
+
+        '<button class="btn btn-primary btn-block" id="pc-submit" style="margin-top:8px;">Enviar a mi equipo médico</button>' +
+      '</div>';
+
+    const slider = document.getElementById("pc-intensidad");
+    const sliderValue = document.getElementById("pc-intensidad-value");
+    slider.addEventListener("input", function () { sliderValue.textContent = slider.value; });
+
+    document.getElementById("pc-cancel").addEventListener("click", confirmDiscardPreconsulta);
+
     document.getElementById("pc-submit").addEventListener("click", function () {
       const motivo = document.getElementById("pc-motivo").value.trim();
-      if (!motivo) return;
+      if (!motivo) { document.getElementById("pc-motivo").focus(); return; }
       const p = currentPatient;
       const list = StorageService.get("preconsultas", []);
       const entry = {
@@ -592,8 +644,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         patientId: p.id, motivo: motivo,
         sintomas: document.getElementById("pc-sintomas").value.trim(),
         duracion: document.getElementById("pc-duracion").value.trim(),
-        intensidad: document.getElementById("pc-intensidad").value,
-        antecedentes: "", medicamentos: "", alergias: "", archivos: "",
+        intensidad: slider.value,
+        antecedentes: document.getElementById("pc-antecedentes").value.trim(),
+        medicamentos: document.getElementById("pc-medicamentos").value.trim(),
+        alergias: document.getElementById("pc-alergias").value.trim(),
+        archivos: document.getElementById("pc-archivos").value.trim(),
         estado: "Pendiente", origen: "paciente",
         fecha: new Date().toISOString().slice(0, 10)
       };
@@ -601,9 +656,21 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       const tl = StorageService.get("timeline", []);
       tl.push({ id: "TL-" + Date.now(), patientId: p.id, type: "preconsulta", title: "Preconsulta enviada por el paciente", description: "Motivo: " + motivo, date: new Date().toISOString().slice(0, 10), actor: p.nombre, metadata: {} });
       StorageService.set("timeline", tl);
-      document.getElementById("modal-overlay").classList.remove("active");
-      renderPortal();
+      window.history.back();
     });
+  }
+
+  function preconsultaHasProgress() {
+    const ids = ["pc-motivo", "pc-sintomas", "pc-duracion", "pc-antecedentes", "pc-medicamentos", "pc-alergias", "pc-archivos"];
+    return ids.some(function (id) {
+      const el = document.getElementById(id);
+      return el && el.value.trim();
+    });
+  }
+
+  function confirmDiscardPreconsulta() {
+    if (preconsultaHasProgress() && !window.confirm("Tienes información sin enviar. ¿Deseas salir de todos modos?")) return;
+    window.history.back();
   }
 
   /* ------------------------------------------------------------
@@ -677,12 +744,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
   document.addEventListener("DOMContentLoaded", function () {
     initLoginSelect();
-    if (window.location.hash === "#portal") {
+    const hash = window.location.hash;
+    if (hash === "#portal" || hash === "#portal/preconsulta") {
       const savedId = sessionStorage.getItem("nexus_contigo_patient");
       const patients = StorageService.get("patients", []);
       const patient = patients.filter(function (p) { return p.id === savedId; })[0];
-      if (patient) enterPortal(patient);
-      else window.location.hash = "";
+      if (patient) {
+        currentPatient = patient;
+        document.getElementById("public-site").style.display = "none";
+        document.getElementById("portal-shell").classList.add("active");
+        if (hash === "#portal/preconsulta") renderPreconsultaScreen();
+        else renderPortal();
+      } else {
+        window.location.hash = "";
+      }
     }
   });
 })();
