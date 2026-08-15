@@ -450,7 +450,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         return JSON.parse(raw);
       } catch (e) { return fallback !== undefined ? fallback : null; }
     }
-    return { get: get };
+    function set(k, value) {
+      try {
+        window.localStorage.setItem(key(k), JSON.stringify(value));
+        return true;
+      } catch (e) { return false; }
+    }
+    return { get: get, set: set };
   })();
 
   const Icons = {
@@ -512,10 +518,24 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       const { data: patientRow } = await supabaseClient
         .from("patients").select("*").eq("patient_user_id", session.user.id).single();
       if (patientRow) {
-        enterPortal(mapSupabasePatient(patientRow));
+        const patient = mapSupabasePatient(patientRow);
+        await pullOwnDocuments(patient.id);
+        enterPortal(patient);
       } else if (status) {
         status.textContent = "Tu cuenta aún no está vinculada a un expediente. Contacta a tu clínica.";
       }
+    }
+
+    async function pullOwnDocuments(patientId) {
+      const { data, error } = await supabaseClient.from("documents").select("*").eq("patient_id", patientId).order("created_at", { ascending: false });
+      if (error || !data) return;
+      StorageService.set("documents", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, patientName: currentPatient ? currentPatient.nombre : "",
+          type: row.type, contenido: row.contenido, autor: row.autor,
+          origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
     }
 
     document.getElementById("btn-login-pw").addEventListener("click", async function () {
@@ -1013,13 +1033,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       '<p style="font-size:11.5px;color:var(--color-text-faint);">Este documento queda visible para tu equipo médico dentro de tu expediente.</p>',
       '<button class="btn btn-primary btn-block" id="ud-submit">Enviar</button>'
     );
-    document.getElementById("ud-submit").addEventListener("click", function () {
+    document.getElementById("ud-submit").addEventListener("click", async function () {
       const desc = document.getElementById("ud-desc").value.trim();
       if (!desc) return;
       const p = currentPatient;
       const docs = StorageService.get("documents", []);
       const doc = {
-        id: "DOC-" + String(docs.length + 1).padStart(4, "0"),
+        id: (supabaseConfigured && window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : "DOC-" + String(docs.length + 1).padStart(4, "0"),
         patientId: p.id, patientName: p.nombre, type: "aporte_paciente",
         contenido: desc + (document.getElementById("ud-detalle").value.trim() ? " — " + document.getElementById("ud-detalle").value.trim() : ""),
         fecha: new Date().toISOString().slice(0, 10), autor: p.nombre, origen: "paciente"
@@ -1028,6 +1048,12 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       const tl = StorageService.get("timeline", []);
       tl.push({ id: "TL-" + Date.now(), patientId: p.id, type: "documento", title: "Documento aportado por el paciente", description: desc, date: new Date().toISOString().slice(0, 10), actor: p.nombre, metadata: {} });
       StorageService.set("timeline", tl);
+      if (supabaseConfigured) {
+        await supabaseClient.from("documents").insert({
+          id: doc.id, patient_id: doc.patientId, type: doc.type,
+          contenido: doc.contenido, autor: doc.autor, origen: "paciente"
+        });
+      }
       document.getElementById("modal-overlay").classList.remove("active");
       renderPortal();
     });

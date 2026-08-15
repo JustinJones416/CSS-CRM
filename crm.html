@@ -1101,6 +1101,29 @@ textarea:focus-visible,
     StorageService.seed("medications", SYNTHETIC_MEDICATIONS);
   }
 
+  /* ============================================================
+     SUPABASE SYNC — Medicamentos (PharmaSync)
+     Módulo de solo lectura por ahora: no hay edición de inventario
+     desde la interfaz todavía, así que solo se trae o se siembra
+     una vez, sin necesidad de un flujo de escritura.
+     ============================================================ */
+  const MedicationSync = {
+    pullOrSeed: async function () {
+      if (!supabaseConfigured) return;
+      let { data } = await supabaseClient.from("medications").select("*");
+      if (!data || data.length === 0) {
+        const seedRows = SYNTHETIC_MEDICATIONS.map(function (m) {
+          return { id: window.crypto.randomUUID(), name: m.name, presentation: m.presentation, facility: m.facility, stock: m.stock, status: m.status };
+        });
+        await supabaseClient.from("medications").insert(seedRows);
+        data = seedRows;
+      }
+      StorageService.set("medications", data.map(function (row) {
+        return { id: row.id, name: row.name, presentation: row.presentation, facility: row.facility, stock: row.stock, status: row.status };
+      }));
+    }
+  };
+
   const MedicationService = {
     list: function () { return StorageService.get("medications", []); },
     uniqueNames: function () {
@@ -1157,18 +1180,50 @@ textarea:focus-visible,
     }
   };
 
+  /* ============================================================
+     SUPABASE SYNC — Documentos
+     ============================================================ */
+  const DocumentSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("documents").select("*").order("created_at", { ascending: false });
+      if (error || !data) return;
+      const patients = PatientService.list();
+      StorageService.set("documents", data.map(function (row) {
+        const pat = patients.filter(function (p) { return p.id === row.patient_id; })[0];
+        return {
+          id: row.id, patientId: row.patient_id, patientName: pat ? pat.nombre : "Paciente",
+          type: row.type, contenido: row.contenido, autor: row.autor,
+          origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("documents").insert({
+        id: entry.id, patient_id: entry.patientId, type: entry.type,
+        contenido: entry.contenido, autor: entry.autor, origen: entry.origen || "personal"
+      });
+    }
+  };
+
   const DocumentService = {
     list: function () { return StorageService.get("documents", []); },
     byPatient: function (patientId) {
       return DocumentService.list().filter(function (d) { return d.patientId === patientId; });
     },
-    nextId: function () { return "DOC-" + String(DocumentService.list().length + 1).padStart(4, "0"); },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "DOC-" + String(DocumentService.list().length + 1).padStart(4, "0");
+    },
     create: function (entry) {
-      return StorageService.update("documents", function (list) {
+      const result = StorageService.update("documents", function (list) {
         list = list || [];
         list.push(entry);
         return list;
       }, []);
+      DocumentSync.pushCreate(entry);
+      return result;
     }
   };
 
@@ -1177,34 +1232,106 @@ textarea:focus-visible,
     return t ? t.label : typeId;
   }
 
+  /* ============================================================
+     SUPABASE SYNC — Médicos y citas
+     ============================================================ */
+  const DoctorSync = {
+    pullOrSeed: async function () {
+      if (!supabaseConfigured) return;
+      let { data } = await supabaseClient.from("doctors").select("*");
+      if (!data || data.length === 0) {
+        const seedRows = SYNTHETIC_DOCTORS.map(function (d) {
+          return { id: window.crypto.randomUUID(), nombre: d.nombre, especialidad: d.especialidad };
+        });
+        await supabaseClient.from("doctors").insert(seedRows);
+        data = seedRows;
+      }
+      StorageService.set("doctors", data.map(function (row) {
+        return { id: row.id, nombre: row.nombre, especialidad: row.especialidad };
+      }));
+    }
+  };
+
+  const AppointmentSync = {
+    toRow: function (a) {
+      return {
+        id: a.id, patient_id: a.patientId, doctor_id: a.doctorId,
+        especialidad: a.especialidad, modalidad: a.modalidad,
+        fecha: a.fecha, hora: a.hora, estado: a.estado
+      };
+    },
+    fromRow: function (row, patients, doctors) {
+      const pat = patients.filter(function (p) { return p.id === row.patient_id; })[0];
+      const doc = doctors.filter(function (d) { return d.id === row.doctor_id; })[0];
+      return {
+        id: row.id, patientId: row.patient_id, patientName: pat ? pat.nombre : "Paciente",
+        doctorId: row.doctor_id, doctorName: doc ? doc.nombre : "Médico",
+        especialidad: row.especialidad, modalidad: row.modalidad,
+        fecha: row.fecha, hora: row.hora.slice(0, 5), estado: row.estado
+      };
+    },
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("appointments").select("*");
+      if (error || !data) return;
+      const patients = PatientService.list();
+      const doctors = AppointmentService.doctors();
+      StorageService.set("appointments", data.map(function (row) { return AppointmentSync.fromRow(row, patients, doctors); }));
+    },
+    pushCreate: async function (appt) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("appointments").insert(AppointmentSync.toRow(appt));
+    },
+    pushUpdate: async function (id, changes) {
+      if (!supabaseConfigured) return;
+      const row = {};
+      if (changes.doctorId !== undefined) row.doctor_id = changes.doctorId;
+      if (changes.especialidad !== undefined) row.especialidad = changes.especialidad;
+      if (changes.modalidad !== undefined) row.modalidad = changes.modalidad;
+      if (changes.fecha !== undefined) row.fecha = changes.fecha;
+      if (changes.hora !== undefined) row.hora = changes.hora;
+      if (changes.estado !== undefined) row.estado = changes.estado;
+      await supabaseClient.from("appointments").update(row).eq("id", id);
+    }
+  };
+
   const AppointmentService = {
     list: function () { return StorageService.get("appointments", []); },
     doctors: function () { return StorageService.get("doctors", []); },
     nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
       const n = AppointmentService.list().length + 1;
       return "CITA-" + String(n).padStart(4, "0");
     },
     create: function (appt) {
-      return StorageService.update("appointments", function (list) {
+      const result = StorageService.update("appointments", function (list) {
         list = list || [];
         list.push(appt);
         return list;
       }, []);
+      AppointmentSync.pushCreate(appt);
+      return result;
     },
     updateStatus: function (id, estado) {
-      return StorageService.update("appointments", function (list) {
+      const result = StorageService.update("appointments", function (list) {
         return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, { estado: estado }) : a; });
       }, []);
+      AppointmentSync.pushUpdate(id, { estado: estado });
+      return result;
     },
     reschedule: function (id, fecha, hora) {
-      return StorageService.update("appointments", function (list) {
+      const result = StorageService.update("appointments", function (list) {
         return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, { fecha: fecha, hora: hora, estado: "Confirmada" }) : a; });
       }, []);
+      AppointmentSync.pushUpdate(id, { fecha: fecha, hora: hora, estado: "Confirmada" });
+      return result;
     },
     update: function (id, changes) {
-      return StorageService.update("appointments", function (list) {
+      const result = StorageService.update("appointments", function (list) {
         return (list || []).map(function (a) { return a.id === id ? Object.assign({}, a, changes) : a; });
       }, []);
+      AppointmentSync.pushUpdate(id, changes);
+      return result;
     },
     upcomingCount: function () {
       const today = new Date().toISOString().slice(0, 10);
@@ -1259,23 +1386,85 @@ textarea:focus-visible,
      ============================================================ */
   const CONSULTATION_FACILITIES = ["Policlínica Central", "Centro de Salud Norte", "Clínica Comunitaria Este"];
 
+  /* ============================================================
+     SUPABASE SYNC — Consultas
+     Los campos fecha/hora/especialidad/modalidad de una consulta
+     no viven en su propia fila: se heredan de la cita asociada,
+     igual que ya hace el modelo local. Al reconstruir desde
+     Supabase, se completan cruzando con las citas ya sincronizadas.
+     ============================================================ */
+  const ConsultaSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const [{ data: rows }, { data: noteRows }] = await Promise.all([
+        supabaseClient.from("consultations").select("*"),
+        supabaseClient.from("consultation_notes").select("*").order("created_at")
+      ]);
+      if (!rows) return;
+      const appts = AppointmentService.list();
+      const patients = PatientService.list();
+      const doctors = AppointmentService.doctors();
+      const notesByConsulta = {};
+      (noteRows || []).forEach(function (n) {
+        (notesByConsulta[n.consultation_id] = notesByConsulta[n.consultation_id] || [])
+          .push({ texto: n.texto, fecha: (n.created_at || "").slice(0, 10) });
+      });
+      const list = rows.map(function (row) {
+        const appt = appts.filter(function (a) { return a.id === row.appointment_id; })[0];
+        const pat = patients.filter(function (p) { return p.id === row.patient_id; })[0];
+        const doc = doctors.filter(function (d) { return d.id === row.doctor_id; })[0];
+        return {
+          id: row.id, appointmentId: row.appointment_id, patientId: row.patient_id,
+          patientName: pat ? pat.nombre : (appt ? appt.patientName : "Paciente"),
+          doctorId: row.doctor_id, doctorName: doc ? doc.nombre : (appt ? appt.doctorName : "Médico"),
+          especialidad: appt ? appt.especialidad : "", modalidad: appt ? appt.modalidad : "Presencial",
+          instalacion: row.instalacion, fecha: appt ? appt.fecha : (row.created_at || "").slice(0, 10),
+          hora: appt ? appt.hora : "", estado: row.estado,
+          notas: notesByConsulta[row.id] || []
+        };
+      });
+      StorageService.set("consultations", list);
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("consultations").insert({
+        id: entry.id, appointment_id: entry.appointmentId, patient_id: entry.patientId,
+        doctor_id: entry.doctorId, instalacion: entry.instalacion, estado: entry.estado
+      });
+    },
+    pushNote: async function (consultationId, nota) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("consultation_notes").insert({
+        id: window.crypto.randomUUID(), consultation_id: consultationId, texto: nota
+      });
+    },
+    pushComplete: async function (id) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("consultations").update({ estado: "Completada" }).eq("id", id);
+    }
+  };
+
   const ConsultaService = {
     list: function () { return StorageService.get("consultations", []); },
-    nextId: function () { return "CONS-" + String(ConsultaService.list().length + 1).padStart(4, "0"); },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "CONS-" + String(ConsultaService.list().length + 1).padStart(4, "0");
+    },
     get: function (id) { return ConsultaService.list().filter(function (c) { return c.id === id; })[0] || null; },
     createFromAppointment: function (appt) {
       const entry = {
         id: ConsultaService.nextId(), appointmentId: appt.id, patientId: appt.patientId, patientName: appt.patientName,
-        doctorName: appt.doctorName, especialidad: appt.especialidad, modalidad: appt.modalidad,
+        doctorId: appt.doctorId, doctorName: appt.doctorName, especialidad: appt.especialidad, modalidad: appt.modalidad,
         instalacion: CONSULTATION_FACILITIES[0], fecha: appt.fecha, hora: appt.hora,
         estado: "En curso", notas: []
       };
       StorageService.update("consultations", function (list) { list = list || []; list.push(entry); return list; }, []);
       AppointmentService.updateStatus(appt.id, "En consulta");
+      ConsultaSync.pushCreate(entry);
       return entry;
     },
     addNote: function (id, nota) {
-      return StorageService.update("consultations", function (list) {
+      const result = StorageService.update("consultations", function (list) {
         return (list || []).map(function (c) {
           if (c.id !== id) return c;
           const notas = c.notas.slice();
@@ -1283,11 +1472,15 @@ textarea:focus-visible,
           return Object.assign({}, c, { notas: notas });
         });
       }, []);
+      ConsultaSync.pushNote(id, nota);
+      return result;
     },
     complete: function (id) {
-      return StorageService.update("consultations", function (list) {
+      const result = StorageService.update("consultations", function (list) {
         return (list || []).map(function (c) { return c.id === id ? Object.assign({}, c, { estado: "Completada" }) : c; });
       }, []);
+      ConsultaSync.pushComplete(id);
+      return result;
     }
   };
 
@@ -1516,6 +1709,11 @@ textarea:focus-visible,
       if (meta) {
         enterWithRoleObject({ id: staffRow.role, label: meta.label, initials: meta.initials });
         await PatientSync.pullAll();
+        await DoctorSync.pullOrSeed();
+        await AppointmentSync.pullAll();
+        await ConsultaSync.pullAll();
+        await MedicationSync.pullOrSeed();
+        await DocumentSync.pullAll();
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Contacta al administrador.";
@@ -2106,6 +2304,7 @@ textarea:focus-visible,
       '<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;">' +
         '<select id="agenda-filter" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:9px 12px;font-size:13px;background:var(--color-surface);color:var(--color-text);">' + filterOptions + '</select>' +
         '<button class="btn btn-primary" id="btn-new-appt">Nueva cita</button>' +
+        (supabaseConfigured ? '<button class="btn btn-secondary" id="btn-sync-appts">Sincronizar</button>' : '') +
       '</div>' +
       UI.sectionBlock(
         "Citas programadas",
@@ -2117,6 +2316,13 @@ textarea:focus-visible,
       renderAgenda(e.target.value);
     });
     document.getElementById("btn-new-appt").addEventListener("click", function () { openNewAppointmentModal(null, filterEstado); });
+    const syncApptBtn = document.getElementById("btn-sync-appts");
+    if (syncApptBtn) syncApptBtn.addEventListener("click", async function () {
+      syncApptBtn.textContent = "Sincronizando…";
+      await AppointmentSync.pullAll();
+      Toast.show("Agenda actualizada desde Supabase.", "success");
+      renderAgenda(filterEstado);
+    });
     Array.prototype.forEach.call(root.querySelectorAll("[data-cancel]"), function (btn) {
       btn.addEventListener("click", function () { confirmCancelAppointment(btn.getAttribute("data-cancel"), filterEstado); });
     });
@@ -2472,10 +2678,19 @@ textarea:focus-visible,
 
     root.innerHTML =
       viewHeader("consultas") +
+      (supabaseConfigured ? '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn btn-secondary btn-sm" id="btn-sync-consultas">Sincronizar</button></div>' : '') +
       UI.sectionBlock("Citas listas para consulta", '<span class="badge badge-neutral">' + readyAppts.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Fecha</th><th></th></tr></thead><tbody>' + readyRows + '</tbody></table>') +
       UI.sectionBlock("Historial de consultas", '<span class="badge badge-neutral">' + consultas.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Modalidad</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>' + histRows + '</tbody></table>');
+
+    const syncConsBtn = document.getElementById("btn-sync-consultas");
+    if (syncConsBtn) syncConsBtn.addEventListener("click", async function () {
+      syncConsBtn.textContent = "Sincronizando…";
+      await ConsultaSync.pullAll();
+      Toast.show("Consultas actualizadas desde Supabase.", "success");
+      renderConsultas();
+    });
 
     Array.prototype.forEach.call(root.querySelectorAll("[data-start]"), function (btn) {
       btn.addEventListener("click", function () {
@@ -2770,7 +2985,8 @@ textarea:focus-visible,
     root.innerHTML =
       viewHeader("documentos") +
       (presetPatientId ? '<button class="btn btn-ghost btn-sm" id="doc-clear-filter" style="padding-left:0;margin-bottom:10px;">← Ver documentos de todos los pacientes</button>' : '') +
-      '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;">' +
+      '<div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:16px;">' +
+        (supabaseConfigured ? '<button class="btn btn-secondary" id="btn-sync-docs">Sincronizar</button>' : '') +
         '<button class="btn btn-primary" id="btn-new-doc">Nuevo documento</button>' +
       '</div>' +
       UI.sectionBlock("Documentos generados", '<span class="badge badge-neutral">' + docs.length + '</span>',
@@ -2783,6 +2999,13 @@ textarea:focus-visible,
       renderDocumentos(null);
     });
     document.getElementById("btn-new-doc").addEventListener("click", function () { openNewDocumentModal(presetPatientId); });
+    const syncDocBtn = document.getElementById("btn-sync-docs");
+    if (syncDocBtn) syncDocBtn.addEventListener("click", async function () {
+      syncDocBtn.textContent = "Sincronizando…";
+      await DocumentSync.pullAll();
+      Toast.show("Documentos actualizados desde Supabase.", "success");
+      renderDocumentos(presetPatientId || null);
+    });
     Array.prototype.forEach.call(root.querySelectorAll("[data-open]"), function (row) {
       row.addEventListener("click", function () { openDocumentViewer(row.getAttribute("data-open")); });
     });
@@ -3147,8 +3370,8 @@ textarea:focus-visible,
      ============================================================ */
   function init() {
     if (!supabaseConfigured) seedPatientData();
-    seedAppointmentData();
-    seedMedicationData();
+    if (!supabaseConfigured) seedAppointmentData();
+    if (!supabaseConfigured) seedMedicationData();
     renderRoleGate();
     initAuth();
 
