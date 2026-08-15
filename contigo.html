@@ -416,6 +416,26 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
+  /* Los proyectos de Supabase creados recientemente usan el flujo
+     PKCE para los enlaces de correo: la URL de retorno trae "?code=..."
+     en vez del token clásico en el hash. Este bloque se resuelve
+     apenas carga la página, sin esperar a DOMContentLoaded, para no
+     perder el evento de recuperación de contraseña por una carrera
+     de tiempos. isPasswordRecovery queda disponible para initAuth().
+     */
+  let isPasswordRecovery = false;
+  let authBootstrap = Promise.resolve();
+  if (supabaseConfigured) {
+    supabaseClient.auth.onAuthStateChange(function (event) {
+      if (event === "PASSWORD_RECOVERY") isPasswordRecovery = true;
+    });
+    if (window.location.href.indexOf("code=") !== -1) {
+      authBootstrap = supabaseClient.auth.exchangeCodeForSession(window.location.href).then(function () {
+        if (window.location.href.indexOf("type=recovery") !== -1) isPasswordRecovery = true;
+      }).catch(function () {});
+    }
+  }
+
   /* Misma capa de almacenamiento y mismo prefijo que Nexus Clinical
      (el CRM interno), para leer los datos reales que el equipo
      clínico registra sobre cada paciente. Este portal es de solo
@@ -465,7 +485,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
      en el repositorio), tras iniciar sesión se busca automáticamente
      el expediente correspondiente a esa cuenta.
      ------------------------------------------------------------ */
-  function initAuth() {
+  async function initAuth() {
     const supaBlock = document.getElementById("auth-supabase");
     const demoBlock = document.getElementById("auth-demo");
     const sub = document.getElementById("access-sub");
@@ -480,6 +500,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     supaBlock.style.display = "block";
     demoBlock.style.display = "none";
     sub.textContent = "Ingresa tu correo y contraseña.";
+
+    await authBootstrap;
+    if (isPasswordRecovery) {
+      document.getElementById("auth-login-block").style.display = "none";
+      document.getElementById("auth-reset-block").style.display = "block";
+      document.getElementById("auth-status").textContent = "Escribe tu nueva contraseña.";
+    }
 
     async function resolveSession(session, status) {
       const { data: patientRow } = await supabaseClient
@@ -551,21 +578,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       resolveSession(data.user ? (await supabaseClient.auth.getSession()).data.session : null, status);
     });
 
-    /* Cuando alguien abre el enlace de "olvidé mi contraseña" desde su
-       correo, Supabase dispara este evento en vez de iniciar sesión
-       normal, así mostramos el formulario de nueva contraseña en lugar
-       de intentar entrar directo al portal. */
-    supabaseClient.auth.onAuthStateChange(function (event) {
-      if (event === "PASSWORD_RECOVERY") {
-        document.getElementById("auth-login-block").style.display = "none";
-        document.getElementById("auth-reset-block").style.display = "block";
-        document.getElementById("auth-status").textContent = "Escribe tu nueva contraseña.";
-      }
-    });
+    /* El registro temprano de PASSWORD_RECOVERY (arriba, antes de
+       DOMContentLoaded) ya se encarga de detectar el enlace de
+       recuperación sin importar el formato que use el proyecto. */
 
     supabaseClient.auth.getSession().then(function (res) {
       const session = res.data && res.data.session;
-      if (session) resolveSession(session, document.getElementById("auth-status"));
+      if (session && !isPasswordRecovery) resolveSession(session, document.getElementById("auth-status"));
     });
   }
 

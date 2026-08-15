@@ -843,6 +843,25 @@ textarea:focus-visible,
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
+  /* Los proyectos de Supabase creados recientemente usan el flujo
+     PKCE para los enlaces de correo: la URL de retorno trae "?code=..."
+     en vez del token clásico en el hash. Este bloque se resuelve
+     apenas carga la página, sin esperar a DOMContentLoaded, para no
+     perder el evento de recuperación de contraseña por una carrera
+     de tiempos. isPasswordRecovery queda disponible para initAuth(). */
+  let isPasswordRecovery = false;
+  let authBootstrap = Promise.resolve();
+  if (supabaseConfigured) {
+    supabaseClient.auth.onAuthStateChange(function (event) {
+      if (event === "PASSWORD_RECOVERY") isPasswordRecovery = true;
+    });
+    if (window.location.href.indexOf("code=") !== -1) {
+      authBootstrap = supabaseClient.auth.exchangeCodeForSession(window.location.href).then(function () {
+        if (window.location.href.indexOf("type=recovery") !== -1) isPasswordRecovery = true;
+      }).catch(function () {});
+    }
+  }
+
   /* ============================================================
      ICONOS (sprite mínimo en línea)
      ============================================================ */
@@ -1423,7 +1442,7 @@ textarea:focus-visible,
     administrador: { label: "Administrador", initials: "AD" }
   };
 
-  function initAuth() {
+  async function initAuth() {
     const supaBlock = document.getElementById("auth-supabase");
     const demoBlock = document.getElementById("auth-demo");
 
@@ -1435,6 +1454,13 @@ textarea:focus-visible,
 
     supaBlock.style.display = "block";
     demoBlock.style.display = "none";
+
+    await authBootstrap;
+    if (isPasswordRecovery) {
+      document.getElementById("auth-login-block").style.display = "none";
+      document.getElementById("auth-reset-block").style.display = "block";
+      document.getElementById("auth-status").textContent = "Escribe tu nueva contraseña.";
+    }
 
     async function resolveSession(session, status) {
       const { data: staffRow } = await supabaseClient
@@ -1508,21 +1534,13 @@ textarea:focus-visible,
       if (res.data.session) resolveSession(res.data.session, status);
     });
 
-    /* Cuando alguien abre el enlace de "olvidé mi contraseña" desde su
-       correo, Supabase dispara este evento en vez de iniciar sesión
-       normal, así mostramos el formulario de nueva contraseña en lugar
-       de intentar resolver el rol directamente. */
-    supabaseClient.auth.onAuthStateChange(function (event) {
-      if (event === "PASSWORD_RECOVERY") {
-        document.getElementById("auth-login-block").style.display = "none";
-        document.getElementById("auth-reset-block").style.display = "block";
-        document.getElementById("auth-status").textContent = "Escribe tu nueva contraseña.";
-      }
-    });
+    /* El registro temprano de PASSWORD_RECOVERY (arriba, antes de
+       DOMContentLoaded) ya se encarga de detectar el enlace de
+       recuperación sin importar el formato que use el proyecto. */
 
     supabaseClient.auth.getSession().then(function (res) {
       const session = res.data && res.data.session;
-      if (session) resolveSession(session, document.getElementById("auth-status"));
+      if (session && !isPasswordRecovery) resolveSession(session, document.getElementById("auth-status"));
     });
   }
 
