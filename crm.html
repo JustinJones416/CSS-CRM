@@ -711,6 +711,17 @@ textarea:focus-visible,
           <label>Contraseña</label>
           <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
         </div>
+        <div class="form-field" id="signup-role-field">
+          <label>¿Para qué área solicitas acceso?</label>
+          <select id="signup-role">
+            <option value="medico">Médico</option>
+            <option value="especialista">Especialista</option>
+            <option value="recepcion">Recepción</option>
+            <option value="farmacia">Farmacia</option>
+            <option value="administrador">Administrador</option>
+          </select>
+          <div class="form-field__hint">Un administrador debe aprobar tu acceso antes de que puedas entrar.</div>
+        </div>
         <button class="btn btn-primary" id="btn-login-pw" style="width:100%;">Ingresar</button>
         <button class="btn btn-secondary" id="btn-signup-pw" style="width:100%;margin-top:8px;">Crear cuenta con este correo</button>
         <button class="btn btn-ghost" id="btn-forgot-pw" style="width:100%;margin-top:2px;font-size:12.5px;">¿Olvidaste tu contraseña?</button>
@@ -1846,7 +1857,7 @@ textarea:focus-visible,
       document.getElementById("auth-status").textContent = "Escribe tu nueva contraseña.";
     }
 
-    async function resolveSession(session, status) {
+    async function resolveSession(session, status, requestedRole) {
       const { data: staffRow } = await supabaseClient
         .from("staff_profiles").select("*").eq("id", session.user.id).single();
       const meta = staffRow && STAFF_ROLE_META[staffRow.role];
@@ -1864,7 +1875,10 @@ textarea:focus-visible,
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
-        await supabaseClient.from("access_requests").upsert({ user_id: session.user.id, email: session.user.email });
+        await supabaseClient.from("access_requests").upsert({
+          user_id: session.user.id, email: session.user.email,
+          requested_role: requestedRole || document.getElementById("signup-role").value
+        });
       }
     }
 
@@ -1894,7 +1908,7 @@ textarea:focus-visible,
         return;
       }
       if (data.session) {
-        resolveSession(data.session, status);
+        resolveSession(data.session, status, document.getElementById("signup-role").value);
       } else if (data.user && data.user.identities && data.user.identities.length === 0) {
         status.textContent = "Ese correo ya tiene una cuenta. Usa \"¿Olvidaste tu contraseña?\" para acceder.";
       } else {
@@ -3484,9 +3498,12 @@ textarea:focus-visible,
   function renderStaffManagementCard() {
     return (
       '<div class="card" style="margin-bottom:20px;">' +
-        '<div class="card-title">Solicitudes de acceso</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">' +
+          '<div class="card-title" style="margin-bottom:0;">Solicitudes de acceso</div>' +
+          '<button class="btn btn-primary btn-sm" id="approve-selected" style="display:none;">Aprobar seleccionadas</button>' +
+        '</div>' +
         '<div class="card-sub" style="margin-bottom:16px;">Personas que crearon una cuenta e intentaron entrar sin tener un rol asignado todavía.</div>' +
-        '<div id="access-requests-list">Cargando…</div>' +
+        '<div id="access-requests-list" style="max-height:360px;overflow-y:auto;">Cargando…</div>' +
       '</div>' +
       '<div class="card" style="margin-bottom:20px;">' +
         '<div class="card-title">Gestión de personal</div>' +
@@ -3504,7 +3521,7 @@ textarea:focus-visible,
         '<div id="staff-status" style="font-size:12px;color:var(--color-text-muted);margin-top:10px;"></div>' +
         '<div class="section-block" style="margin-top:18px;box-shadow:none;">' +
           '<div class="section-block__head"><h3>Personal registrado</h3></div>' +
-          '<div class="section-block__body" id="staff-list" style="padding:16px 20px;">Cargando…</div>' +
+          '<div class="section-block__body" id="staff-list" style="padding:16px 20px;max-height:320px;overflow-y:auto;">Cargando…</div>' +
         '</div>' +
       '</div>'
     );
@@ -3516,15 +3533,22 @@ textarea:focus-visible,
       const { data, error } = await supabaseClient.from("access_requests").select("*").order("requested_at");
       if (error || !data) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">No se pudo cargar la lista.</div>'; return; }
       if (data.length === 0) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">Sin solicitudes pendientes.</div>'; return; }
+      const approveSelectedBtn = document.getElementById("approve-selected");
+      approveSelectedBtn.style.display = data.length > 1 ? "inline-flex" : "none";
+
       listEl.innerHTML = data.map(function (r) {
         return (
           '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--color-border);flex-wrap:wrap;">' +
-            '<div><div style="font-weight:600;font-size:13px;">' + r.email + '</div><div class="mono" style="font-size:10.5px;color:var(--color-text-muted);">' + r.user_id + '</div></div>' +
-            '<div style="display:flex;gap:8px;align-items:center;">' +
+            '<div style="display:flex;align-items:center;gap:10px;min-width:0;">' +
+              '<input type="checkbox" class="req-checkbox" data-uid="' + r.user_id + '" style="width:16px;height:16px;flex-shrink:0;">' +
+              '<div style="min-width:0;"><div style="font-weight:600;font-size:13px;overflow-wrap:anywhere;">' + r.email + '</div><div class="mono" style="font-size:10.5px;color:var(--color-text-muted);overflow-wrap:anywhere;">' + r.user_id + '</div></div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
               '<select data-req-role="' + r.user_id + '" style="border:1px solid var(--color-border);border-radius:8px;padding:6px 8px;font-size:12px;">' +
-                '<option value="medico">Médico</option><option value="especialista">Especialista</option>' +
-                '<option value="recepcion">Recepción</option><option value="farmacia">Farmacia</option>' +
-                '<option value="administrador">Administrador</option>' +
+                ["medico", "especialista", "recepcion", "farmacia", "administrador"].map(function (roleId) {
+                  const labels = { medico: "Médico", especialista: "Especialista", recepcion: "Recepción", farmacia: "Farmacia", administrador: "Administrador" };
+                  return '<option value="' + roleId + '"' + (r.requested_role === roleId ? " selected" : "") + '>' + labels[roleId] + '</option>';
+                }).join("") +
               '</select>' +
               '<button class="btn btn-primary btn-sm" data-approve="' + r.user_id + '" data-email="' + r.email + '">Aprobar</button>' +
               '<button class="btn btn-ghost btn-sm" data-reject="' + r.user_id + '">Rechazar</button>' +
@@ -3533,14 +3557,16 @@ textarea:focus-visible,
         );
       }).join("");
 
+      async function approveOne(uid, email) {
+        const role = listEl.querySelector('[data-req-role="' + uid + '"]').value;
+        await supabaseClient.from("staff_profiles").insert({ id: uid, full_name: email, role: role });
+        await supabaseClient.from("access_requests").delete().eq("user_id", uid);
+      }
+
       Array.prototype.forEach.call(listEl.querySelectorAll("[data-approve]"), function (btn) {
         btn.addEventListener("click", async function () {
-          const uid = btn.getAttribute("data-approve");
-          const email = btn.getAttribute("data-email");
-          const role = listEl.querySelector('[data-req-role="' + uid + '"]').value;
           btn.textContent = "Aprobando…";
-          await supabaseClient.from("staff_profiles").insert({ id: uid, full_name: email, role: role });
-          await supabaseClient.from("access_requests").delete().eq("user_id", uid);
+          await approveOne(btn.getAttribute("data-approve"), btn.getAttribute("data-email"));
           Toast.show("Acceso aprobado.", "success");
           loadAccessRequests();
           loadStaffList();
@@ -3553,6 +3579,22 @@ textarea:focus-visible,
           loadAccessRequests();
         });
       });
+      approveSelectedBtn.onclick = async function () {
+        const checked = Array.prototype.slice.call(listEl.querySelectorAll(".req-checkbox:checked"));
+        if (checked.length === 0) { Toast.show("Selecciona al menos una solicitud.", "danger"); return; }
+        approveSelectedBtn.textContent = "Aprobando " + checked.length + "…";
+        approveSelectedBtn.disabled = true;
+        for (const cb of checked) {
+          const uid = cb.getAttribute("data-uid");
+          const emailEl = cb.closest("div").querySelector('[data-approve="' + uid + '"]');
+          await approveOne(uid, emailEl ? emailEl.getAttribute("data-email") : "");
+        }
+        Toast.show(checked.length + " cuentas aprobadas.", "success");
+        approveSelectedBtn.disabled = false;
+        approveSelectedBtn.textContent = "Aprobar seleccionadas";
+        loadAccessRequests();
+        loadStaffList();
+      };
     }
     loadAccessRequests();
 

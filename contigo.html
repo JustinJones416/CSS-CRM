@@ -658,6 +658,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
   function enterPortal(patient) {
     currentPatient = patient;
+    /* Deja un escalón real en el historial del navegador. Sin esto,
+       "Cancelar y volver" desde Preconsulta o Agendar (que hacen
+       history.back()) saltaba directo al estado previo a iniciar
+       sesión, cerrándola por accidente. */
+    if (window.location.hash !== "#portal") window.location.hash = "portal";
     document.getElementById("public-site").style.display = "none";
     document.getElementById("portal-shell").classList.add("active");
     renderPortal();
@@ -855,6 +860,25 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           '</div>' +
 
           '<div class="p-card">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+              '<h3 style="margin-bottom:0;">Mis datos de contacto</h3>' +
+              (supabaseConfigured ? '<button class="btn btn-secondary btn-sm" id="btn-edit-profile">Editar</button>' : '') +
+            '</div>' +
+            '<div id="profile-view" style="font-size:13px;line-height:1.9;">' +
+              '<div><strong>Teléfono:</strong> ' + (p.telefono || "Sin registrar") + '</div>' +
+              '<div><strong>Correo:</strong> ' + (p.correo || "Sin registrar") + '</div>' +
+            '</div>' +
+            '<div id="profile-edit" style="display:none;">' +
+              '<div class="field"><label>Teléfono</label><input type="text" id="profile-telefono" value="' + (p.telefono || "") + '"></div>' +
+              '<div class="field"><label>Correo</label><input type="email" id="profile-correo" value="' + (p.correo || "") + '"></div>' +
+              '<div style="display:flex;gap:8px;">' +
+                '<button class="btn btn-primary btn-sm" id="profile-save">Guardar</button>' +
+                '<button class="btn btn-ghost btn-sm" id="profile-cancel">Cancelar</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="p-card">' +
             '<h3>Resumen clínico</h3>' +
             '<div style="font-size:13px;line-height:1.9;">' +
               '<div><strong>Alergias:</strong> ' + p.alergias.join(", ") + '</div>' +
@@ -864,6 +888,36 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           '</div>' +
         '</div>' +
       '</div>';
+
+    const editBtn = document.getElementById("btn-edit-profile");
+    if (editBtn) editBtn.addEventListener("click", function () {
+      document.getElementById("profile-view").style.display = "none";
+      document.getElementById("profile-edit").style.display = "block";
+    });
+    const profCancel = document.getElementById("profile-cancel");
+    if (profCancel) profCancel.addEventListener("click", function () {
+      document.getElementById("profile-edit").style.display = "none";
+      document.getElementById("profile-view").style.display = "block";
+    });
+    const profSave = document.getElementById("profile-save");
+    if (profSave) profSave.addEventListener("click", async function () {
+      const telefono = document.getElementById("profile-telefono").value.trim();
+      const correo = document.getElementById("profile-correo").value.trim();
+      profSave.disabled = true;
+      profSave.textContent = "Guardando…";
+      const { error } = await supabaseClient.rpc("update_own_contact_info", { new_telefono: telefono, new_correo: correo });
+      if (error) {
+        Toast_showLocal("No se pudo guardar. Intenta de nuevo.");
+        profSave.disabled = false;
+        profSave.textContent = "Guardar";
+        return;
+      }
+      currentPatient.telefono = telefono;
+      currentPatient.correo = correo;
+      await pushTimelineEvent({ patientId: p.id, type: "perfil", title: "Datos de contacto actualizados por el paciente", description: "Teléfono y correo actualizados desde Nexus Contigo.", actor: p.nombre });
+      Toast_showLocal("Datos actualizados.");
+      renderPortal();
+    });
 
     Array.prototype.forEach.call(main.querySelectorAll("[data-doc]"), function (row) {
       row.addEventListener("click", function () { openDocViewer(row.getAttribute("data-doc")); });
