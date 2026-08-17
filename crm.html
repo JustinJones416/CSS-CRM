@@ -999,6 +999,7 @@ textarea:focus-visible,
      directamente.
      ============================================================ */
   const PATIENT_STATUSES = ["Activo", "En seguimiento", "Inactivo"];
+  const PIPELINE_STATUSES = ["Nuevo", "Preconsulta", "Pendiente de atención", "Consulta", "Plan médico", "Documentación", "Seguimiento", "Cerrado"];
 
   const SYNTHETIC_PATIENTS = [
     {
@@ -1048,7 +1049,8 @@ textarea:focus-visible,
         id: p.id, nombre: p.nombre, identificacion: p.identificacion, edad: p.edad,
         telefono: p.telefono, correo: p.correo, estado: p.estado,
         alergias: p.alergias, medicamentos: p.medicamentos,
-        antecedentes: p.antecedentes, condiciones: p.condiciones
+        antecedentes: p.antecedentes, condiciones: p.condiciones,
+        pipeline_estado: p.pipelineEstado || "Nuevo"
       };
     },
     fromRow: function (row) {
@@ -1057,6 +1059,7 @@ textarea:focus-visible,
         telefono: row.telefono, correo: row.correo, estado: row.estado,
         alergias: row.alergias || [], medicamentos: row.medicamentos || [],
         antecedentes: row.antecedentes || [], condiciones: row.condiciones || [],
+        pipelineEstado: row.pipeline_estado || "Nuevo",
         proximaAtencion: null
       };
     },
@@ -1095,6 +1098,13 @@ textarea:focus-visible,
         return (list || []).map(function (p) { return p.id === id ? Object.assign({}, p, changes) : p; });
       }, []);
       PatientSync.pushUpdate(id, changes);
+      return result;
+    },
+    updatePipeline: function (id, pipelineEstado) {
+      const result = StorageService.update("patients", function (list) {
+        return (list || []).map(function (p) { return p.id === id ? Object.assign({}, p, { pipelineEstado: pipelineEstado }) : p; });
+      }, []);
+      if (supabaseConfigured) supabaseClient.from("patients").update({ pipeline_estado: pipelineEstado }).eq("id", id);
       return result;
     },
     nextId: function () {
@@ -1540,6 +1550,61 @@ textarea:focus-visible,
   };
 
   /* ============================================================
+     SUPABASE SYNC — Lista de espera (sección 17)
+     ============================================================ */
+  const WAITLIST_STATUSES = ["Pendiente", "Contactado", "Agendado", "Cancelado"];
+
+  const WaitlistSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("waitlist").select("*").order("created_at");
+      if (error || !data) return;
+      StorageService.set("waitlist", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, especialidad: row.especialidad,
+          modalidadPreferida: row.modalidad_preferida, notas: row.notas || "",
+          estado: row.estado, fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("waitlist").insert({
+        id: entry.id, patient_id: entry.patientId, especialidad: entry.especialidad,
+        modalidad_preferida: entry.modalidadPreferida, notas: entry.notas, estado: entry.estado
+      });
+    },
+    pushEstado: async function (id, estado) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("waitlist").update({ estado: estado }).eq("id", id);
+    }
+  };
+
+  const WaitlistService = {
+    list: function () { return StorageService.get("waitlist", []); },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "WL-" + String(WaitlistService.list().length + 1).padStart(4, "0");
+    },
+    create: function (entry) {
+      const result = StorageService.update("waitlist", function (list) {
+        list = list || [];
+        list.push(entry);
+        return list;
+      }, []);
+      WaitlistSync.pushCreate(entry);
+      return result;
+    },
+    updateEstado: function (id, estado) {
+      const result = StorageService.update("waitlist", function (list) {
+        return (list || []).map(function (w) { return w.id === id ? Object.assign({}, w, { estado: estado }) : w; });
+      }, []);
+      WaitlistSync.pushEstado(id, estado);
+      return result;
+    }
+  };
+
+  /* ============================================================
      PRECONSULTA SERVICE — Preconsulta Inteligente
      ============================================================ */
   /* ============================================================
@@ -1973,6 +2038,7 @@ textarea:focus-visible,
         await PreconsultaSync.pullAll();
         await TimelineSync.pullAll();
         await ReferralSync.pullAll();
+        await WaitlistSync.pullAll();
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
@@ -2375,6 +2441,13 @@ textarea:focus-visible,
         '</div>' +
       '</div>' +
 
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">' +
+        '<span style="font-size:11.5px;color:var(--color-text-muted);font-weight:600;">Estado del pipeline</span>' +
+        '<select id="pipeline-select" style="border:1px solid var(--color-border);border-radius:8px;padding:6px 10px;font-size:12.5px;background:var(--color-surface);">' +
+          PIPELINE_STATUSES.map(function (s) { return '<option value="' + s + '"' + ((p.pipelineEstado || "Nuevo") === s ? ' selected' : '') + '>' + s + '</option>'; }).join("") +
+        '</select>' +
+      '</div>' +
+
       '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;" class="p360-grid">' +
 
         '<div>' +
@@ -2432,6 +2505,16 @@ textarea:focus-visible,
       navigateTo("pacientes");
     });
     document.getElementById("edit-patient-btn").addEventListener("click", function () { openEditPatientModal(p.id); });
+    document.getElementById("pipeline-select").addEventListener("change", function (e) {
+      PatientService.updatePipeline(p.id, e.target.value);
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: p.id, type: "pipeline",
+        title: "Estado de pipeline actualizado a " + e.target.value, description: "",
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Toast.show("Estado de pipeline actualizado.", "success");
+    });
     Array.prototype.forEach.call(root.querySelectorAll("[data-action]"), function (btn) {
       btn.addEventListener("click", function () {
         acciones[parseInt(btn.getAttribute("data-action"), 10)].handler();
@@ -2587,6 +2670,8 @@ textarea:focus-visible,
       return (a.fecha + a.hora) < (b.fecha + b.hora) ? -1 : 1;
     });
     const filtered = filterEstado ? all.filter(function (a) { return a.estado === filterEstado; }) : all;
+    const waitlist = WaitlistService.list().filter(function (w) { return w.estado === "Pendiente" || w.estado === "Contactado"; });
+    const patients = PatientService.list();
 
     const filterOptions = '<option value="">Todos los estados</option>' +
       APPOINTMENT_STATUSES.map(function (s) {
@@ -2628,6 +2713,24 @@ textarea:focus-visible,
         "Citas programadas",
         '<span class="badge badge-neutral">' + filtered.length + ' de ' + all.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Modalidad</th><th>Fecha y hora</th><th>Estado</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+      ) +
+      UI.sectionBlock(
+        "Lista de espera",
+        '<span class="badge badge-neutral">' + waitlist.length + '</span> <button class="btn btn-secondary btn-sm" id="btn-new-waitlist" style="margin-left:8px;">Agregar a lista de espera</button>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Especialidad</th><th>Preferencia</th><th></th></tr></thead><tbody>' +
+          (waitlist.length === 0
+            ? '<tr><td colspan="4" style="padding:0;">' + UI.emptyState("Sin pacientes en espera", "Cuando no haya disponibilidad inmediata para una especialidad, agrega al paciente aquí en vez de dejarlo sin registro.") + '</td></tr>'
+            : waitlist.map(function (w) {
+                const pat = patients.filter(function (p) { return p.id === w.patientId; })[0];
+                return '<tr><td>' + (pat ? pat.nombre : w.patientId) + '</td>' +
+                  '<td><span class="badge badge-accent">' + w.especialidad + '</span></td>' +
+                  '<td>' + w.modalidadPreferida + (w.notas ? ' · ' + w.notas : '') + '</td>' +
+                  '<td style="text-align:right;white-space:nowrap;">' +
+                    '<button class="btn btn-ghost btn-sm" data-convert-wl="' + w.id + '">Convertir en cita</button>' +
+                    '<button class="btn btn-ghost btn-sm" data-cancel-wl="' + w.id + '" style="color:var(--color-danger);">Quitar</button>' +
+                  '</td></tr>';
+              }).join("")) +
+        '</tbody></table>'
       );
 
     document.getElementById("agenda-filter").addEventListener("change", function (e) {
@@ -2649,6 +2752,57 @@ textarea:focus-visible,
     });
     Array.prototype.forEach.call(root.querySelectorAll("[data-edit]"), function (btn) {
       btn.addEventListener("click", function () { openEditAppointmentModal(btn.getAttribute("data-edit"), filterEstado); });
+    });
+    const newWlBtn = document.getElementById("btn-new-waitlist");
+    if (newWlBtn) newWlBtn.addEventListener("click", function () { openNewWaitlistModal(filterEstado); });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-cancel-wl]"), function (btn) {
+      btn.addEventListener("click", function () {
+        WaitlistService.updateEstado(btn.getAttribute("data-cancel-wl"), "Cancelado");
+        Toast.show("Quitado de la lista de espera.", "success");
+        renderAgenda(filterEstado);
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-convert-wl]"), function (btn) {
+      btn.addEventListener("click", function () {
+        const wlEntry = WaitlistService.list().filter(function (w) { return w.id === btn.getAttribute("data-convert-wl"); })[0];
+        if (!wlEntry) return;
+        WaitlistService.updateEstado(wlEntry.id, "Agendado");
+        openNewAppointmentModal(wlEntry.patientId, filterEstado);
+      });
+    });
+  }
+
+  function openNewWaitlistModal(filterEstado) {
+    const patients = PatientService.list();
+    if (patients.length === 0) { Toast.show("Registra al menos un paciente antes de agregarlo a la lista de espera.", "danger"); return; }
+    Modal.open({
+      title: "Agregar a lista de espera",
+      body:
+        '<div class="form-field"><label>Paciente</label><select id="wl-patient">' +
+          patients.map(function (p) { return '<option value="' + p.id + '">' + p.nombre + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Especialidad</label><select id="wl-especialidad">' +
+          SPECIALTIES_FOR_REFERRAL.concat(["Medicina general"]).map(function (e) { return '<option value="' + e + '">' + e + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Modalidad preferida</label><select id="wl-modalidad"><option>Presencial</option><option>Virtual</option></select></div>' +
+        '<div class="form-field"><label>Notas</label><input type="text" id="wl-notas" placeholder="Ej. Solo disponible por las tardes"></div>',
+      foot:
+        '<button class="btn btn-secondary" id="wl-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="wl-save">Agregar</button>'
+    });
+    document.getElementById("wl-cancel").addEventListener("click", Modal.close);
+    document.getElementById("wl-save").addEventListener("click", function () {
+      const entry = {
+        id: WaitlistService.nextId(), patientId: document.getElementById("wl-patient").value,
+        especialidad: document.getElementById("wl-especialidad").value,
+        modalidadPreferida: document.getElementById("wl-modalidad").value,
+        notas: document.getElementById("wl-notas").value.trim(),
+        estado: "Pendiente", fecha: new Date().toISOString().slice(0, 10)
+      };
+      WaitlistService.create(entry);
+      Modal.close();
+      Toast.show("Paciente agregado a la lista de espera.", "success");
+      renderAgenda(filterEstado);
     });
   }
 
