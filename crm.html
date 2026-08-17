@@ -1320,6 +1320,63 @@ textarea:focus-visible,
   };
 
   /* ============================================================
+     SUPABASE SYNC — Referencias a especialistas (sección 21)
+     ============================================================ */
+  const REFERRAL_STATUSES = ["Pendiente", "Atendida", "Cancelada"];
+
+  const ReferralSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("referrals").select("*").order("created_at", { ascending: false });
+      if (error || !data) return;
+      StorageService.set("referrals", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, especialidad: row.especialidad,
+          motivo: row.motivo, estado: row.estado, fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("referrals").insert({
+        id: entry.id, patient_id: entry.patientId, especialidad: entry.especialidad,
+        motivo: entry.motivo, estado: entry.estado
+      });
+    },
+    pushEstado: async function (id, estado) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("referrals").update({ estado: estado }).eq("id", id);
+    }
+  };
+
+  const ReferralService = {
+    list: function () { return StorageService.get("referrals", []); },
+    byPatient: function (patientId) {
+      return ReferralService.list().filter(function (r) { return r.patientId === patientId; });
+    },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "REF-" + String(ReferralService.list().length + 1).padStart(4, "0");
+    },
+    create: function (entry) {
+      const result = StorageService.update("referrals", function (list) {
+        list = list || [];
+        list.push(entry);
+        return list;
+      }, []);
+      ReferralSync.pushCreate(entry);
+      return result;
+    },
+    updateEstado: function (id, estado) {
+      const result = StorageService.update("referrals", function (list) {
+        return (list || []).map(function (r) { return r.id === id ? Object.assign({}, r, { estado: estado }) : r; });
+      }, []);
+      ReferralSync.pushEstado(id, estado);
+      return result;
+    }
+  };
+
+  /* ============================================================
      SUPABASE SYNC — Documentos
      ============================================================ */
   const DocumentSync = {
@@ -1915,6 +1972,7 @@ textarea:focus-visible,
         await FollowUpSync.pullAll();
         await PreconsultaSync.pullAll();
         await TimelineSync.pullAll();
+        await ReferralSync.pullAll();
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
@@ -2299,7 +2357,8 @@ textarea:focus-visible,
       { label: "Iniciar videoconsulta", handler: function () { navigateTo("consultas"); } },
       { label: "Ver documentos", handler: function () { navigateToPatientDocuments(p.id); } },
       { label: "Ver medicamentos", handler: function () { navigateTo("medicamentos"); } },
-      { label: "Agregar seguimiento", handler: function () { openAddFollowUpModal(p.id); } }
+      { label: "Agregar seguimiento", handler: function () { openAddFollowUpModal(p.id); } },
+      { label: "Generar referencia", handler: function () { openReferralModal(p.id); } }
     ];
 
     root.innerHTML =
@@ -2432,6 +2491,43 @@ textarea:focus-visible,
       Modal.close();
       Toast.show("Datos del paciente actualizados.", "success");
       renderPatient360(id);
+    });
+  }
+
+  const SPECIALTIES_FOR_REFERRAL = ["Cardiología", "Endocrinología", "Pediatría", "Dermatología", "Ginecología", "Ortopedia", "Neurología", "Psiquiatría"];
+
+  function openReferralModal(patientId) {
+    Modal.open({
+      title: "Generar referencia",
+      body:
+        '<div class="form-field"><label>Especialidad</label><select id="rf-especialidad">' +
+          SPECIALTIES_FOR_REFERRAL.map(function (e) { return '<option value="' + e + '">' + e + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Motivo</label><textarea id="rf-motivo" rows="3" placeholder="Motivo de la referencia"></textarea></div>' +
+        '<div class="form-field__hint">La referencia queda visible para cualquier especialista de esa área en el módulo Consultas.</div>',
+      foot:
+        '<button class="btn btn-secondary" id="rf-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="rf-save">Generar referencia</button>'
+    });
+    document.getElementById("rf-cancel").addEventListener("click", Modal.close);
+    document.getElementById("rf-save").addEventListener("click", function () {
+      const especialidad = document.getElementById("rf-especialidad").value;
+      const motivo = document.getElementById("rf-motivo").value.trim();
+      if (!motivo) { Toast.show("Indica el motivo de la referencia.", "danger"); return; }
+      const entry = {
+        id: ReferralService.nextId(), patientId: patientId, especialidad: especialidad,
+        motivo: motivo, estado: "Pendiente", fecha: new Date().toISOString().slice(0, 10)
+      };
+      ReferralService.create(entry);
+      TimelineService.add({
+        id: "TL-" + Date.now(), patientId: patientId, type: "referencia",
+        title: "Referencia generada a " + especialidad, description: motivo,
+        date: new Date().toISOString().slice(0, 10),
+        actor: AppState.currentUser ? AppState.currentUser.label : "Sistema", metadata: {}
+      });
+      Modal.close();
+      Toast.show("Referencia generada.", "success");
+      renderPatient360(patientId);
     });
   }
 
@@ -2903,18 +2999,43 @@ textarea:focus-visible,
           );
         }).join("");
 
+    const patients = PatientService.list();
+    const pendingReferrals = ReferralService.list().filter(function (r) { return r.estado === "Pendiente"; });
+    const referralsRows = pendingReferrals.length === 0
+      ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState("Sin referencias pendientes", "Las referencias generadas desde la ficha de un paciente aparecerán aquí para cualquier especialista.") + '</td></tr>'
+      : pendingReferrals.map(function (r) {
+          const pat = patients.filter(function (p) { return p.id === r.patientId; })[0];
+          return (
+            '<tr><td>' + (pat ? pat.nombre : r.patientId) + '</td>' +
+              '<td><span class="badge badge-accent">' + r.especialidad + '</span></td>' +
+              '<td>' + r.motivo + '</td>' +
+              '<td class="mono">' + r.fecha + '</td>' +
+              '<td style="text-align:right;"><button class="btn btn-secondary btn-sm" data-attend-ref="' + r.id + '">Marcar como atendida</button></td></tr>'
+          );
+        }).join("");
+
     root.innerHTML =
       viewHeader("consultas") +
       (supabaseConfigured ? '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;"><button class="btn btn-secondary btn-sm" id="btn-sync-consultas">Sincronizar</button></div>' : '') +
+      UI.sectionBlock("Referencias pendientes de especialista", '<span class="badge badge-neutral">' + pendingReferrals.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Especialidad</th><th>Motivo</th><th>Fecha</th><th></th></tr></thead><tbody>' + referralsRows + '</tbody></table>') +
       UI.sectionBlock("Citas listas para consulta", '<span class="badge badge-neutral">' + readyAppts.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Fecha</th><th></th></tr></thead><tbody>' + readyRows + '</tbody></table>') +
       UI.sectionBlock("Historial de consultas", '<span class="badge badge-neutral">' + consultas.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Modalidad</th><th>Fecha</th><th>Estado</th></tr></thead><tbody>' + histRows + '</tbody></table>');
 
+    Array.prototype.forEach.call(root.querySelectorAll("[data-attend-ref]"), function (btn) {
+      btn.addEventListener("click", function () {
+        ReferralService.updateEstado(btn.getAttribute("data-attend-ref"), "Atendida");
+        Toast.show("Referencia marcada como atendida.", "success");
+        renderConsultas();
+      });
+    });
     const syncConsBtn = document.getElementById("btn-sync-consultas");
     if (syncConsBtn) syncConsBtn.addEventListener("click", async function () {
       syncConsBtn.textContent = "Sincronizando…";
       await ConsultaSync.pullAll();
+      await ReferralSync.pullAll();
       Toast.show("Consultas actualizadas desde Supabase.", "success");
       renderConsultas();
     });
