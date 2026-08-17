@@ -754,6 +754,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   function renderPortal() {
     const main = document.getElementById("portal-main");
     const p = currentPatient;
+    main.innerHTML = '<div class="portal-greeting">Hola, ' + p.nombre.split(" ")[0] + '</div><div class="portal-sub">Cargando…</div>';
+    if (supabaseConfigured) {
+      supabaseClient.rpc("my_queue_position").then(function (res) {
+        const row = res.data && res.data[0];
+        renderPortalBody(row || null);
+      });
+    } else {
+      renderPortalBody(null);
+    }
+  }
+
+  function renderPortalBody(queueStatus) {
+    const main = document.getElementById("portal-main");
+    const p = currentPatient;
     const appts = StorageService.get("appointments", [])
       .filter(function (a) { return a.patientId === p.id; })
       .sort(function (a, b) { return (a.fecha + a.hora) < (b.fecha + b.hora) ? -1 : 1; });
@@ -773,6 +787,14 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     main.innerHTML =
       '<div class="portal-greeting">Hola, ' + p.nombre.split(" ")[0] + '</div>' +
       '<div class="portal-sub">Esto es lo más importante de tu cuidado en este momento.</div>' +
+
+      (queueStatus
+        ? '<div class="next-appt" style="background:#0B2B27;">' +
+            '<div class="next-appt__label">Tu lugar en la fila — ' + queueStatus.facility + '</div>' +
+            '<div class="next-appt__date">Posición ' + queueStatus.position + '</div>' +
+            '<div class="next-appt__meta">Tiempo estimado de espera: ≈ ' + queueStatus.estimated_minutes + ' minutos (estimado)</div>' +
+          '</div>'
+        : '') +
 
       (nextAppt
         ? '<div class="next-appt">' +

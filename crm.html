@@ -1605,6 +1605,72 @@ textarea:focus-visible,
   };
 
   /* ============================================================
+     SUPABASE SYNC — Smart Queue (sección 32)
+     Cola digital real: posición y tiempo estimado se calculan a
+     partir de datos reales de llegada, nunca inventados. El
+     tiempo estimado se muestra siempre etiquetado como estimación.
+     ============================================================ */
+  const QUEUE_MINUTES_PER_PATIENT = 12;
+
+  const QueueSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("queue_entries").select("*").order("arrived_at");
+      if (error || !data) return;
+      StorageService.set("queue", data.map(function (row) {
+        return {
+          id: row.id, patientId: row.patient_id, facility: row.facility,
+          estado: row.estado, arrivedAt: row.arrived_at
+        };
+      }));
+    },
+    pushCreate: async function (entry) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("queue_entries").insert({
+        id: entry.id, patient_id: entry.patientId, facility: entry.facility, estado: entry.estado
+      });
+    },
+    pushEstado: async function (id, estado) {
+      if (!supabaseConfigured) return;
+      const patch = { estado: estado };
+      if (estado === "Llamado") patch.called_at = new Date().toISOString();
+      if (estado === "Atendido" || estado === "Cancelado") patch.closed_at = new Date().toISOString();
+      await supabaseClient.from("queue_entries").update(patch).eq("id", id);
+    }
+  };
+
+  const QueueService = {
+    list: function () { return StorageService.get("queue", []); },
+    waiting: function (facility) {
+      return QueueService.list()
+        .filter(function (q) { return q.estado === "Esperando" && (!facility || q.facility === facility); })
+        .sort(function (a, b) { return (a.arrivedAt || "") < (b.arrivedAt || "") ? -1 : 1; });
+    },
+    nextId: function () {
+      if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+      return "Q-" + String(QueueService.list().length + 1).padStart(4, "0");
+    },
+    checkIn: function (patientId, facility) {
+      const entry = { id: QueueService.nextId(), patientId: patientId, facility: facility, estado: "Esperando", arrivedAt: new Date().toISOString() };
+      const result = StorageService.update("queue", function (list) { list = list || []; list.push(entry); return list; }, []);
+      QueueSync.pushCreate(entry);
+      return result;
+    },
+    updateEstado: function (id, estado) {
+      const result = StorageService.update("queue", function (list) {
+        return (list || []).map(function (q) { return q.id === id ? Object.assign({}, q, { estado: estado }) : q; });
+      }, []);
+      QueueSync.pushEstado(id, estado);
+      return result;
+    },
+    positionOf: function (id) {
+      const waiting = QueueService.waiting();
+      const idx = waiting.findIndex(function (q) { return q.id === id; });
+      return idx === -1 ? null : idx + 1;
+    }
+  };
+
+  /* ============================================================
      PRECONSULTA SERVICE — Preconsulta Inteligente
      ============================================================ */
   /* ============================================================
@@ -2060,6 +2126,7 @@ textarea:focus-visible,
         await TimelineSync.pullAll();
         await ReferralSync.pullAll();
         await WaitlistSync.pullAll();
+        await QueueSync.pullAll();
         AuditLog.record("LOGIN_SUCCESS", "session", null, {});
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
@@ -2726,6 +2793,8 @@ textarea:focus-visible,
           );
         }).join("");
 
+    const queueWaiting = QueueService.waiting();
+
     root.innerHTML =
       viewHeader("agenda") +
       '<div style="display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;">' +
@@ -2737,6 +2806,24 @@ textarea:focus-visible,
         "Citas programadas",
         '<span class="badge badge-neutral">' + filtered.length + ' de ' + all.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Médico</th><th>Modalidad</th><th>Fecha y hora</th><th>Estado</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>'
+      ) +
+      UI.sectionBlock(
+        "Cola de hoy",
+        '<span class="badge badge-neutral">' + queueWaiting.length + ' esperando</span> <button class="btn btn-secondary btn-sm" id="btn-checkin" style="margin-left:8px;">Registrar llegada</button>',
+        '<table class="table"><thead><tr><th>#</th><th>Paciente</th><th>Instalación</th><th>Tiempo estimado</th><th></th></tr></thead><tbody>' +
+          (queueWaiting.length === 0
+            ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState("Sin pacientes en la cola", "Registra la llegada de un paciente para que aparezca aquí con su posición y tiempo estimado.") + '</td></tr>'
+            : queueWaiting.map(function (q, i) {
+                const pat = patients.filter(function (p) { return p.id === q.patientId; })[0];
+                return '<tr><td class="mono">' + (i + 1) + '</td><td>' + (pat ? pat.nombre : q.patientId) + '</td>' +
+                  '<td>' + q.facility + '</td>' +
+                  '<td class="mono">≈ ' + (i * QUEUE_MINUTES_PER_PATIENT) + ' min (estimado)</td>' +
+                  '<td style="text-align:right;white-space:nowrap;">' +
+                    '<button class="btn btn-secondary btn-sm" data-queue-call="' + q.id + '">Llamar</button>' +
+                    '<button class="btn btn-ghost btn-sm" data-queue-cancel="' + q.id + '" style="color:var(--color-danger);">Quitar</button>' +
+                  '</td></tr>';
+              }).join("")) +
+        '</tbody></table>'
       ) +
       UI.sectionBlock(
         "Lista de espera",
@@ -2778,6 +2865,21 @@ textarea:focus-visible,
       btn.addEventListener("click", function () { openEditAppointmentModal(btn.getAttribute("data-edit"), filterEstado); });
     });
     const newWlBtn = document.getElementById("btn-new-waitlist");
+    document.getElementById("btn-checkin").addEventListener("click", function () { openCheckInModal(filterEstado); });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-queue-call]"), function (btn) {
+      btn.addEventListener("click", function () {
+        QueueService.updateEstado(btn.getAttribute("data-queue-call"), "Llamado");
+        Toast.show("Paciente llamado.", "success");
+        renderAgenda(filterEstado);
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-queue-cancel]"), function (btn) {
+      btn.addEventListener("click", function () {
+        QueueService.updateEstado(btn.getAttribute("data-queue-cancel"), "Cancelado");
+        Toast.show("Quitado de la cola.", "success");
+        renderAgenda(filterEstado);
+      });
+    });
     if (newWlBtn) newWlBtn.addEventListener("click", function () { openNewWaitlistModal(filterEstado); });
     Array.prototype.forEach.call(root.querySelectorAll("[data-cancel-wl]"), function (btn) {
       btn.addEventListener("click", function () {
@@ -2793,6 +2895,32 @@ textarea:focus-visible,
         WaitlistService.updateEstado(wlEntry.id, "Agendado");
         openNewAppointmentModal(wlEntry.patientId, filterEstado);
       });
+    });
+  }
+
+  function openCheckInModal(filterEstado) {
+    const patients = PatientService.list();
+    if (patients.length === 0) { Toast.show("Registra al menos un paciente antes de usar la cola.", "danger"); return; }
+    Modal.open({
+      title: "Registrar llegada",
+      body:
+        '<div class="form-field"><label>Paciente</label><select id="qi-patient">' +
+          patients.map(function (p) { return '<option value="' + p.id + '">' + p.nombre + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field"><label>Instalación</label><select id="qi-facility">' +
+          CONSULTATION_FACILITIES.map(function (f) { return '<option value="' + f + '">' + f + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-field__hint">El tiempo estimado es aproximado, calculado por posición en la cola, no una promesa exacta.</div>',
+      foot:
+        '<button class="btn btn-secondary" id="qi-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="qi-save">Registrar</button>'
+    });
+    document.getElementById("qi-cancel").addEventListener("click", Modal.close);
+    document.getElementById("qi-save").addEventListener("click", function () {
+      QueueService.checkIn(document.getElementById("qi-patient").value, document.getElementById("qi-facility").value);
+      Modal.close();
+      Toast.show("Llegada registrada.", "success");
+      renderAgenda(filterEstado);
     });
   }
 
