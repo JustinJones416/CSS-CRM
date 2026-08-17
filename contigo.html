@@ -692,18 +692,12 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
   document.getElementById("btn-logout").addEventListener("click", function () {
     sessionStorage.removeItem("nexus_contigo_patient");
-    if (window.location.hash === "#portal") {
-      window.history.back();
-    } else {
-      exitPortal();
-    }
+    window.history.replaceState(null, "", window.location.pathname);
+    exitPortal();
   });
   document.getElementById("btn-back-home").addEventListener("click", function () {
-    if (window.location.hash === "#portal") {
-      window.history.back();
-    } else {
-      exitPortal();
-    }
+    window.history.replaceState(null, "", window.location.pathname);
+    exitPortal();
   });
 
   /* Soporte de botón atrás/adelante del navegador: entrar al portal
