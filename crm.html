@@ -1781,6 +1781,7 @@ textarea:focus-visible,
       StorageService.update("consultations", function (list) { list = list || []; list.push(entry); return list; }, []);
       AppointmentService.updateStatus(appt.id, "En consulta");
       ConsultaSync.pushCreate(entry);
+      AuditLog.record("CONSULTATION_CREATED", "consultations", entry.id, {});
       return entry;
     },
     addNote: function (id, nota) {
@@ -1988,6 +1989,25 @@ textarea:focus-visible,
     enterWithRoleObject(role);
   }
 
+  /* ============================================================
+     AUDIT LOG — registro técnico de acciones sensibles (sección 39)
+     Distinto del timeline operativo: esto es trazabilidad de
+     seguridad (quién, qué, cuándo), no historia clínica. No
+     guarda información clínica en metadata a propósito.
+     ============================================================ */
+  let currentSessionUserId = null;
+  const AuditLog = {
+    record: async function (action, resource, resourceId, metadata) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("audit_logs").insert({
+        user_id: currentSessionUserId,
+        role: AppState.currentUser ? AppState.currentUser.role : null,
+        action: action, resource: resource, resource_id: resourceId || null,
+        metadata: metadata || {}
+      });
+    }
+  };
+
   /* ------------------------------------------------------------
      Autenticación real por correo y contraseña. El rol no se
      elige manualmente: se lee de staff_profiles según la cuenta
@@ -2023,6 +2043,7 @@ textarea:focus-visible,
     }
 
     async function resolveSession(session, status, requestedRole) {
+      currentSessionUserId = session.user.id;
       const { data: staffRow } = await supabaseClient
         .from("staff_profiles").select("*").eq("id", session.user.id).single();
       const meta = staffRow && STAFF_ROLE_META[staffRow.role];
@@ -2039,6 +2060,7 @@ textarea:focus-visible,
         await TimelineSync.pullAll();
         await ReferralSync.pullAll();
         await WaitlistSync.pullAll();
+        AuditLog.record("LOGIN_SUCCESS", "session", null, {});
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
         status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
@@ -2415,6 +2437,7 @@ textarea:focus-visible,
     const root = document.getElementById("view-root");
     const p = PatientService.get(id);
     if (!p) { renderPacientes(); return; }
+    AuditLog.record("PATIENT_VIEWED", "patients", id, {});
     const timeline = TimelineService.listByPatient(id);
 
     const acciones = [
@@ -2565,6 +2588,7 @@ textarea:focus-visible,
         condiciones: toList(document.getElementById("ep-condiciones").value) || ["Sin registrar"]
       };
       PatientService.update(id, changes);
+      AuditLog.record("PATIENT_UPDATED", "patients", id, {});
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: id, type: "edicion",
         title: "Datos del paciente actualizados", description: "Edición de ficha desde Patient 360°.",
@@ -2849,6 +2873,7 @@ textarea:focus-visible,
         modalidad: modalidad, fecha: fecha, hora: hora, estado: "Programada"
       };
       AppointmentService.create(appt);
+      AuditLog.record("APPOINTMENT_CREATED", "appointments", appt.id, {});
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: patientId, type: "cita",
         title: "Cita creada", description: especialidad + " · " + modalidad + " · " + fecha + " " + hora + ".",
@@ -2873,6 +2898,7 @@ textarea:focus-visible,
     document.getElementById("cc-no").addEventListener("click", Modal.close);
     document.getElementById("cc-yes").addEventListener("click", function () {
       AppointmentService.updateStatus(id, "Cancelada");
+      AuditLog.record("APPOINTMENT_CANCELLED", "appointments", id, {});
       Modal.close();
       Toast.show("Cita cancelada.", "success");
       renderAgenda(filterEstado);
@@ -3418,6 +3444,7 @@ textarea:focus-visible,
     const patients = PatientService.list();
     const rows = MedicationService.byName(medName);
     const alternativas = SYNTHETIC_ALTERNATIVES[medName] || ["Sin alternativas registradas para este medicamento."];
+    AuditLog.record("AI_RECOMMENDATION_VIEWED", "medications", null, { medicamento: medName });
 
     Modal.open({
       title: "Copiloto farmacológico",
@@ -3571,6 +3598,7 @@ textarea:focus-visible,
       }
 
       DocumentService.create(doc);
+      AuditLog.record("DOCUMENT_CREATED", "documents", doc.id, { type: doc.type });
       TimelineService.add({
         id: "TL-" + Date.now(), patientId: patientId, type: "documento",
         title: docTypeLabel(tipo) + " generado", description: "Documento asociado al paciente.",
@@ -3841,11 +3869,39 @@ textarea:focus-visible,
           '<div class="section-block__head"><h3>Personal registrado</h3></div>' +
           '<div class="section-block__body" id="staff-list" style="padding:16px 20px;max-height:320px;overflow-y:auto;">Cargando…</div>' +
         '</div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px;">' +
+          '<div class="card-title" style="margin-bottom:0;">Registro de auditoría</div>' +
+          '<button class="btn btn-secondary btn-sm" id="btn-load-audit">Cargar</button>' +
+        '</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Últimas acciones sensibles registradas: inicios de sesión, expedientes vistos o editados, citas, consultas y documentos creados.</div>' +
+        '<div id="audit-log-list" style="max-height:360px;overflow-y:auto;font-size:12.5px;color:var(--color-text-muted);">Presiona "Cargar" para ver el registro.</div>' +
       '</div>'
     );
   }
 
   function wireStaffManagementCard() {
+    document.getElementById("btn-load-audit").addEventListener("click", async function () {
+      const listEl = document.getElementById("audit-log-list");
+      listEl.textContent = "Cargando…";
+      const { data, error } = await supabaseClient.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(100);
+      if (error || !data) { listEl.textContent = "No se pudo cargar el registro."; return; }
+      if (data.length === 0) { listEl.textContent = "Sin acciones registradas todavía."; return; }
+      const actionLabels = {
+        LOGIN_SUCCESS: "Inicio de sesión", PATIENT_VIEWED: "Expediente visto", PATIENT_UPDATED: "Expediente editado",
+        APPOINTMENT_CREATED: "Cita creada", APPOINTMENT_CANCELLED: "Cita cancelada",
+        CONSULTATION_CREATED: "Consulta iniciada", DOCUMENT_CREATED: "Documento generado",
+        AI_RECOMMENDATION_VIEWED: "Copiloto farmacológico consultado"
+      };
+      listEl.innerHTML = data.map(function (row) {
+        return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--color-border);">' +
+          '<span>' + (actionLabels[row.action] || row.action) + (row.role ? ' · ' + row.role : '') + '</span>' +
+          '<span class="mono" style="font-size:11px;flex-shrink:0;">' + (row.created_at || "").replace("T", " ").slice(0, 19) + '</span>' +
+        '</div>';
+      }).join("");
+    });
+
     async function loadAccessRequests() {
       const listEl = document.getElementById("access-requests-list");
       const { data, error } = await supabaseClient.from("access_requests").select("*").order("requested_at");
