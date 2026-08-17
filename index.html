@@ -4,14 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nexus Clinical</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <link rel="canonical" href="crm.html">
 <script>
-  /* Redirige a crm.html preservando ?query y #hash. Es crítico
-     para los enlaces de Supabase (recuperar contraseña, confirmar
-     correo): si se descartara ese código en el salto, el enlace
-     llegaría "vacío" y el flujo de recuperación nunca se activaría
-     en crm.html. */
-  var target = "crm.html" + window.location.search + window.location.hash;
+  /* Redirige a crm.html preservando ?query y #hash (crítico para
+     los enlaces de Supabase: recuperar contraseña, confirmar
+     correo). Además agrega un parámetro de caché ("v") para que
+     el navegador no sirva una copia vieja de crm.html guardada
+     de una visita anterior. */
+  var search = window.location.search;
+  var version = "v=" + Date.now();
+  var joined = search ? (search + "&" + version) : ("?" + version);
+  var target = "crm.html" + joined + window.location.hash;
   window.location.replace(target);
 </script>
 <style>
