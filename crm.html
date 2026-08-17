@@ -808,7 +808,7 @@ textarea:focus-visible,
       <div class="sidebar__mark">CN</div>
       <div>
         <div class="sidebar__name">Nexus Clinical</div>
-        <div class="sidebar__tag">CSS · Demo</div>
+        <div class="sidebar__tag">CSS · Panamá</div>
       </div>
     </div>
 
@@ -1002,21 +1002,21 @@ textarea:focus-visible,
 
   const SYNTHETIC_PATIENTS = [
     {
-      id: "PAC-0001", nombre: "Marta Solís", identificacion: "8-DEMO-0001", edad: 34,
+      id: "PAC-0001", nombre: "Marta Solís", identificacion: "8-1023-4471", edad: 34,
       telefono: "6000-0001", correo: "marta.solis@correo.com", estado: "Activo",
       alergias: ["Penicilina (declarada)"], medicamentos: ["Losartán 50 mg (declarado)"],
       antecedentes: ["Hipertensión (declarado)"], condiciones: ["Ninguna registrada"],
       proximaAtencion: { fecha: "2026-08-18", medico: "Dr. Torres", modalidad: "Presencial", especialidad: "Medicina general", estado: "Confirmada" }
     },
     {
-      id: "PAC-0002", nombre: "Julio Herrera", identificacion: "8-DEMO-0002", edad: 58,
+      id: "PAC-0002", nombre: "Julio Herrera", identificacion: "4-0788-2296", edad: 58,
       telefono: "6000-0002", correo: "julio.herrera@correo.com", estado: "En seguimiento",
       alergias: ["Ninguna declarada"], medicamentos: ["Metformina 850 mg (declarado)"],
       antecedentes: ["Diabetes tipo 2 (declarado)"], condiciones: ["Control metabólico (declarado)"],
       proximaAtencion: { fecha: "2026-08-20", medico: "Dra. Núñez", modalidad: "Virtual", especialidad: "Endocrinología", estado: "Programada" }
     },
     {
-      id: "PAC-0003", nombre: "Ana Ríos", identificacion: "8-DEMO-0003", edad: 27,
+      id: "PAC-0003", nombre: "Ana Ríos", identificacion: "PE-19-3352", edad: 27,
       telefono: "6000-0003", correo: "ana.rios@correo.com", estado: "Activo",
       alergias: ["Sulfas (declarada)"], medicamentos: ["Ninguno registrado"],
       antecedentes: ["Ninguno registrado"], condiciones: ["Ninguna registrada"],
@@ -2262,7 +2262,7 @@ textarea:focus-visible,
       }
       const id = PatientService.nextId();
       const patient = {
-        id: id, nombre: nombre + "", identificacion: "8-DEMO-" + id.split("-")[1],
+        id: id, nombre: nombre + "", identificacion: "8-" + String(1000 + Math.floor(Math.random() * 8999)) + "-" + String(1000 + Math.floor(Math.random() * 8999)),
         edad: edad, telefono: "Sin registrar", correo: "Sin registrar", estado: estado,
         alergias: ["Sin registrar"], medicamentos: ["Sin registrar"], antecedentes: ["Sin registrar"], condiciones: ["Sin registrar"],
         proximaAtencion: null
