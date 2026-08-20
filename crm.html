@@ -2132,6 +2132,7 @@ textarea:focus-visible,
      guarda información clínica en metadata a propósito.
      ============================================================ */
   let currentSessionUserId = null;
+  let accessRequestsPollTimer = null;
   const AuditLog = {
     record: async function (action, resource, resourceId, metadata) {
       if (!supabaseConfigured) return;
@@ -4258,9 +4259,13 @@ textarea:focus-visible,
 
     async function loadAccessRequests() {
       const listEl = document.getElementById("access-requests-list");
+      if (!listEl) return; // la vista cambió mientras cargaba, no hay dónde pintar
       const { data, error } = await supabaseClient.from("access_requests").select("*").order("requested_at");
-      if (error || !data) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">No se pudo cargar la lista.</div>'; return; }
-      if (data.length === 0) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">Sin solicitudes pendientes.</div>'; return; }
+      if (error) {
+        listEl.innerHTML = '<div style="color:var(--color-danger);font-size:12.5px;">No se pudo cargar: ' + error.message + '</div>';
+        return;
+      }
+      if (!data || data.length === 0) { listEl.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;">Sin solicitudes pendientes.</div>'; return; }
       const approveSelectedBtn = document.getElementById("approve-selected");
       approveSelectedBtn.style.display = data.length > 1 ? "inline-flex" : "none";
 
@@ -4325,6 +4330,20 @@ textarea:focus-visible,
       };
     }
     loadAccessRequests();
+
+    /* Actualización automática mientras el administrador esté en esta
+       pantalla: si un invitado se registra en otro momento, aparece
+       sin que haga falta salir y volver a entrar. Se detiene sola si
+       la vista cambia (el contenedor deja de existir en el DOM). */
+    if (accessRequestsPollTimer) window.clearInterval(accessRequestsPollTimer);
+    accessRequestsPollTimer = window.setInterval(function () {
+      if (!document.getElementById("access-requests-list")) {
+        window.clearInterval(accessRequestsPollTimer);
+        accessRequestsPollTimer = null;
+        return;
+      }
+      loadAccessRequests();
+    }, 6000);
 
 
     async function loadStaffList() {
