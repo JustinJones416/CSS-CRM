@@ -2202,11 +2202,14 @@ textarea:focus-visible,
         AuditLog.record("LOGIN_SUCCESS", "session", null, {});
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
-        status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
-        await supabaseClient.from("access_requests").upsert({
+        status.textContent = "Registrando tu solicitud…";
+        const { error: reqError } = await supabaseClient.from("access_requests").upsert({
           user_id: session.user.id, email: session.user.email,
           requested_role: requestedRole || document.getElementById("signup-role").value
         });
+        status.textContent = reqError
+          ? "No se pudo registrar tu solicitud (" + reqError.message + "). Contacta al administrador directamente."
+          : "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
       }
     }
 
