@@ -108,6 +108,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   .modal__close { width: 32px; height: 32px; }
   .tag-chip button { width: 24px; height: 24px; }
   .tag-chip { padding: 9px 10px 9px 14px; }
+  button.p-badge { padding: 8px 13px; }
 }
 .btn-block { width: 100%; }
 
@@ -249,6 +250,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .p-badge-warn { background: #FEF3C7; color: #92400E; }
 .p-badge-info { background: var(--color-primary-soft); color: var(--color-primary-dark); }
 .p-badge-danger { background: #FEE2E2; color: #991B1B; }
+.p-badge-neutral { background: var(--color-surface-muted); color: var(--color-text-muted); }
+button.p-badge {
+  display: inline-flex; align-items: center; font-family: var(--font-body); font-weight: 700;
+  transition: background var(--transition), color var(--transition), transform var(--transition);
+}
+button.p-badge:hover { transform: translateY(-1px); }
+button.p-badge-neutral:hover { background: var(--color-border); color: var(--color-text); }
 
 .quick-actions { display: grid; grid-template-columns: repeat(5,1fr); gap: 10px; margin-bottom: 20px; }
 .quick-action {
