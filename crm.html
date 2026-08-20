@@ -2206,10 +2206,16 @@ textarea:focus-visible,
         const { error: reqError } = await supabaseClient.from("access_requests").upsert({
           user_id: session.user.id, email: session.user.email,
           requested_role: requestedRole || document.getElementById("signup-role").value
-        });
-        status.textContent = reqError
-          ? "No se pudo registrar tu solicitud (" + reqError.message + "). Contacta al administrador directamente."
-          : "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
+        }, { onConflict: "user_id" });
+        if (reqError) {
+          console.error("access_requests upsert error:", reqError, "user_id:", session.user.id);
+          status.textContent = "No se pudo registrar tu solicitud: " + reqError.message +
+            (reqError.details ? " — " + reqError.details : "") +
+            (reqError.hint ? " (" + reqError.hint + ")" : "") +
+            " · ID: " + session.user.id;
+        } else {
+          status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
+        }
       }
     }
 
