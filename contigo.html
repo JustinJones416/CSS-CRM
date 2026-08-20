@@ -1057,6 +1057,60 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
      paciente ya escribió nunca se pierde. */
   let pcTags = { antecedentes: [], medicamentos: [], alergias: [], archivos: [] };
   let pcBodyZones = [];
+  let pcVoiceBlob = null;
+  let pcMediaRecorder = null;
+  let pcRecordedChunks = [];
+
+  /* Nota de voz — versión sin transcripción, tal como quedó
+     documentada en el sprint: se graba, se sube, y el profesional
+     la escucha manualmente desde el CRM. Requiere permiso del
+     micrófono; si el navegador no lo soporta o el usuario lo
+     niega, el resto de la preconsulta sigue funcionando igual,
+     esta función nunca bloquea el envío. */
+  function wireVoiceRecorder() {
+    const btn = document.getElementById("pc-voice-record");
+    const status = document.getElementById("pc-voice-status");
+    const preview = document.getElementById("pc-voice-preview");
+    if (!btn) return;
+
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      btn.disabled = true;
+      status.textContent = "Tu navegador no admite grabar audio aquí.";
+      return;
+    }
+
+    btn.addEventListener("click", async function () {
+      if (pcMediaRecorder && pcMediaRecorder.state === "recording") {
+        pcMediaRecorder.stop();
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        pcRecordedChunks = [];
+        pcMediaRecorder = new MediaRecorder(stream);
+        pcMediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) pcRecordedChunks.push(e.data); };
+        pcMediaRecorder.onstop = function () {
+          pcVoiceBlob = new Blob(pcRecordedChunks, { type: "audio/webm" });
+          stream.getTracks().forEach(function (t) { t.stop(); });
+          btn.textContent = "● Grabar";
+          status.textContent = "Grabación lista.";
+          preview.innerHTML = '<audio controls src="' + URL.createObjectURL(pcVoiceBlob) + '" style="width:100%;max-width:280px;"></audio> ' +
+            '<button type="button" class="btn btn-ghost btn-sm" id="pc-voice-delete">Borrar</button>';
+          document.getElementById("pc-voice-delete").addEventListener("click", function () {
+            pcVoiceBlob = null;
+            preview.innerHTML = "";
+            status.textContent = "";
+          });
+        };
+        pcMediaRecorder.start();
+        btn.textContent = "■ Detener";
+        status.textContent = "Grabando…";
+      } catch (e) {
+        status.textContent = "No se pudo acceder al micrófono.";
+      }
+    });
+  }
+
 
   const BODY_ZONE_LABELS = {
     cabeza: "Cabeza", torso_sup: "Torso superior", torso_inf: "Torso inferior",
@@ -1194,6 +1248,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   function renderPreconsultaScreen() {
     pcTags = { antecedentes: [], medicamentos: [], alergias: [], archivos: [] };
     pcBodyZones = [];
+    pcVoiceBlob = null;
+    pcRecordedChunks = [];
     const main = document.getElementById("portal-main");
     main.innerHTML =
       '<button class="btn btn-ghost" id="pc-cancel" style="padding-left:0;margin-bottom:14px;">← Cancelar y volver</button>' +
@@ -1232,6 +1288,16 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         tagFieldHTML("alergias", "Alergias", "Ej. Penicilina") +
         tagFieldHTML("archivos", "Archivos o fotos", "", true) +
 
+        '<div class="field">' +
+          '<label>Nota de voz (opcional)</label>' +
+          '<div style="font-size:11.5px;color:var(--color-text-faint);margin-bottom:8px;">Si prefieres, cuéntalo con tu voz en vez de escribirlo.</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            '<button type="button" class="btn btn-secondary btn-sm" id="pc-voice-record">● Grabar</button>' +
+            '<span id="pc-voice-status" style="font-size:12px;color:var(--color-text-muted);"></span>' +
+          '</div>' +
+          '<div id="pc-voice-preview" style="margin-top:8px;"></div>' +
+        '</div>' +
+
         '<button class="btn btn-primary btn-block" id="pc-submit" style="margin-top:8px;">Enviar a mi equipo médico</button>' +
       '</div>';
 
@@ -1244,6 +1310,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       wireTagAdd(key);
     });
     wireTagList("archivos");
+    wireVoiceRecorder();
     Array.prototype.forEach.call(document.querySelectorAll("[data-body-zone]"), function (el) {
       el.addEventListener("click", function () { toggleBodyZone(el.getAttribute("data-body-zone")); });
     });
@@ -1281,12 +1348,18 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       pushTimelineEvent({ patientId: p.id, type: "preconsulta", title: "Preconsulta enviada por el paciente", description: "Motivo: " + motivo, actor: p.nombre });
       if (supabaseConfigured) {
         const toArr = function (v) { return Array.isArray(v) ? v : (v ? [v] : []); };
+        let audioPath = null;
+        if (pcVoiceBlob) {
+          const path = entry.patientId + "/" + entry.id + ".webm";
+          const { error: audioErr } = await supabaseClient.storage.from("voice-notes").upload(path, pcVoiceBlob, { contentType: "audio/webm" });
+          if (!audioErr) audioPath = path;
+        }
         await supabaseClient.from("preconsultas").insert({
           id: entry.id, patient_id: entry.patientId, motivo: entry.motivo,
           sintomas: entry.sintomas, duracion: entry.duracion, intensidad: String(entry.intensidad || ""),
           antecedentes: toArr(entry.antecedentes), medicamentos: toArr(entry.medicamentos),
           alergias: toArr(entry.alergias), archivos: toArr(entry.archivos),
-          zonas_corporales: toArr(entry.zonasCorporales),
+          zonas_corporales: toArr(entry.zonasCorporales), audio_path: audioPath,
           estado: entry.estado, origen: "paciente"
         });
         await autoCreateAppointmentFromPreconsulta(entry);

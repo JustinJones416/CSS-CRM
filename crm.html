@@ -753,7 +753,7 @@ textarea:focus-visible,
           <label>Contraseña</label>
           <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password">
         </div>
-        <div class="form-field" id="signup-role-field">
+        <div class="form-field" id="signup-role-field" style="display:none;">
           <label>¿Para qué área solicitas acceso?</label>
           <select id="signup-role">
             <option value="medico">Médico</option>
@@ -1736,6 +1736,7 @@ textarea:focus-visible,
           sintomas: row.sintomas || "", duracion: row.duracion || "", intensidad: row.intensidad || "",
           antecedentes: row.antecedentes || [], medicamentos: row.medicamentos || [],
           alergias: row.alergias || [], archivos: row.archivos || [],
+          zonasCorporales: row.zonas_corporales || [], audioPath: row.audio_path || null,
           estado: row.estado, origen: row.origen || "personal",
           fecha: (row.created_at || "").slice(0, 10)
         };
@@ -2209,6 +2210,11 @@ textarea:focus-visible,
     }
 
     document.getElementById("btn-login-pw").addEventListener("click", async function () {
+      const roleField = document.getElementById("signup-role-field");
+      if (roleField.style.display !== "none") {
+        roleField.style.display = "none";
+        document.getElementById("btn-signup-pw").textContent = "Crear cuenta con este correo";
+      }
       const email = document.getElementById("auth-email").value.trim();
       const password = document.getElementById("auth-password").value;
       const status = document.getElementById("auth-status");
@@ -2220,6 +2226,12 @@ textarea:focus-visible,
     });
 
     document.getElementById("btn-signup-pw").addEventListener("click", async function () {
+      const roleField = document.getElementById("signup-role-field");
+      if (roleField.style.display === "none") {
+        roleField.style.display = "block";
+        this.textContent = "Confirmar y crear cuenta";
+        return;
+      }
       const email = document.getElementById("auth-email").value.trim();
       const password = document.getElementById("auth-password").value;
       const status = document.getElementById("auth-status");
@@ -3150,7 +3162,7 @@ textarea:focus-visible,
     precheckStep = 0;
   }
 
-  function openPreconsultaDetailModal(id) {
+  async function openPreconsultaDetailModal(id) {
     const pc = PreconsultaService.list().filter(function (x) { return x.id === id; })[0];
     if (!pc) return;
     const pat = PatientService.get(pc.patientId);
@@ -3165,13 +3177,22 @@ textarea:focus-visible,
         row("Síntomas", pc.sintomas, "sin especificar") +
         row("Duración", pc.duracion, "sin especificar") +
         row("Intensidad", pc.intensidad ? pc.intensidad + " / 10" : "sin especificar") +
+        row("Zonas señaladas en el cuerpo", pc.zonasCorporales, "ninguna") +
         row("Antecedentes", pc.antecedentes, "ninguno registrado") +
         row("Medicamentos actuales", pc.medicamentos, "ninguno registrado") +
         row("Alergias", pc.alergias, "ninguna registrada") +
-        row("Archivos referenciados", pc.archivos, "ninguno"),
+        row("Archivos referenciados", pc.archivos, "ninguno") +
+        (pc.audioPath ? '<div style="margin-bottom:6px;"><div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:6px;">Nota de voz</div><div id="pcd-audio">Cargando…</div></div>' : ''),
       foot: '<button class="btn btn-secondary" id="pcd-close">Cerrar</button>'
     });
     document.getElementById("pcd-close").addEventListener("click", Modal.close);
+    if (pc.audioPath && supabaseConfigured) {
+      const { data } = await supabaseClient.storage.from("voice-notes").createSignedUrl(pc.audioPath, 300);
+      const audioEl = document.getElementById("pcd-audio");
+      if (audioEl) audioEl.innerHTML = data && data.signedUrl
+        ? '<audio controls src="' + data.signedUrl + '" style="width:100%;"></audio>'
+        : 'No se pudo cargar el audio.';
+    }
   }
 
   function renderPreconsulta(presetPatientId) {
