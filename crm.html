@@ -2205,25 +2205,25 @@ textarea:focus-visible,
         status.textContent = "Registrando tu solicitud…";
 
         /* Antes de escribir, confirma con el servidor (no con la copia
-           guardada en el navegador) que la sesión sigue siendo válida.
-           Una sesión "aparente" pero vencida hace que auth.uid() se
-           evalúe vacío del lado de Supabase, y la política de RLS
-           rechaza la escritura sin importar cuántas veces se reintente. */
+           guardada en el navegador) que la sesión sigue siendo válida. */
         const { data: freshUser, error: userCheckError } = await supabaseClient.auth.getUser();
         if (userCheckError || !freshUser || !freshUser.user) {
           status.textContent = "Tu sesión expiró. Cierra esta pestaña, ábrela de nuevo e inicia sesión otra vez.";
           return;
         }
 
-        const { error: reqError } = await supabaseClient.from("access_requests").upsert({
-          user_id: freshUser.user.id, email: freshUser.user.email,
-          requested_role: requestedRole || document.getElementById("signup-role").value
-        }, { onConflict: "user_id" });
+        /* Se usa una función de base de datos (RPC), no un upsert
+           directo a la tabla: el mismo patrón que ya usan
+           cancel_own_appointment y reschedule_own_appointment,
+           evitando depender de la política RLS de esta tabla en
+           particular para esta operación. */
+        const { error: reqError } = await supabaseClient.rpc("submit_access_request", {
+          p_email: freshUser.user.email,
+          p_requested_role: requestedRole || document.getElementById("signup-role").value
+        });
         if (reqError) {
-          console.error("access_requests upsert error:", reqError, "user_id:", freshUser.user.id);
+          console.error("submit_access_request error:", reqError, "user_id:", freshUser.user.id);
           status.textContent = "No se pudo registrar tu solicitud: " + reqError.message +
-            (reqError.details ? " — " + reqError.details : "") +
-            (reqError.hint ? " (" + reqError.hint + ")" : "") +
             " · ID: " + freshUser.user.id;
         } else {
           status.textContent = "Tu cuenta aún no está registrada como personal. Se notificó al administrador.";
