@@ -860,6 +860,7 @@ textarea:focus-visible,
 <div class="toast-stack" id="toast-stack"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -1251,6 +1252,48 @@ textarea:focus-visible,
   };
 
   /* ============================================================
+     SUPABASE SYNC — Reservas de medicamentos
+     "Reservar" registra la intención y notifica; no descuenta
+     inventario real todavía (eso requeriría un flujo de
+     dispensación física que no existe en el sistema). Si no hay
+     stock, la solicitud queda igual, pendiente para farmacia.
+     ============================================================ */
+  const ReservationSync = {
+    pullAll: async function () {
+      if (!supabaseConfigured) return;
+      const { data, error } = await supabaseClient.from("medication_reservations").select("*").order("created_at", { ascending: false });
+      if (error || !data) return;
+      const patients = PatientService.list();
+      const meds = MedicationService.list();
+      StorageService.set("reservations", data.map(function (row) {
+        const pat = patients.filter(function (p) { return p.id === row.patient_id; })[0];
+        const med = meds.filter(function (m) { return m.id === row.medication_id; })[0];
+        return {
+          id: row.id, patientId: row.patient_id, patientName: pat ? pat.nombre : "Paciente",
+          medicationId: row.medication_id, medicationName: med ? med.name : "Medicamento",
+          cantidad: row.cantidad, estado: row.estado, fecha: (row.created_at || "").slice(0, 10)
+        };
+      }));
+    },
+    pushEstado: async function (id, estado) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("medication_reservations").update({ estado: estado }).eq("id", id);
+    }
+  };
+
+  const ReservationService = {
+    list: function () { return StorageService.get("reservations", []); },
+    pending: function () { return ReservationService.list().filter(function (r) { return r.estado === "Sin stock (pendiente)"; }); },
+    updateEstado: function (id, estado) {
+      const result = StorageService.update("reservations", function (list) {
+        return (list || []).map(function (r) { return r.id === id ? Object.assign({}, r, { estado: estado }) : r; });
+      }, []);
+      ReservationSync.pushEstado(id, estado);
+      return result;
+    }
+  };
+
+  /* ============================================================
      DOCUMENT SERVICE — Documentación de consulta
      ============================================================ */
   const DOCUMENT_TYPES = [
@@ -1401,7 +1444,8 @@ textarea:focus-visible,
           id: row.id, patientId: row.patient_id, patientName: pat ? pat.nombre : "Paciente",
           type: row.type, contenido: row.contenido, autor: row.autor,
           origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10),
-          filePath: row.file_path || null
+          filePath: row.file_path || null,
+          qrCode: row.qr_code || null, signatureUrl: row.signature_url || null, autoSigned: !!row.auto_signed
         };
       }));
     },
@@ -1410,7 +1454,8 @@ textarea:focus-visible,
       await supabaseClient.from("documents").insert({
         id: entry.id, patient_id: entry.patientId, type: entry.type,
         contenido: entry.contenido, autor: entry.autor, origen: entry.origen || "personal",
-        file_path: entry.filePath || null
+        file_path: entry.filePath || null,
+        qr_code: entry.qrCode || null, signature_url: entry.signatureUrl || null, auto_signed: !!entry.autoSigned
       });
     }
   };
@@ -1448,14 +1493,14 @@ textarea:focus-visible,
       if (!supabaseConfigured) return;
       let { data } = await supabaseClient.from("doctors").select("*");
       if (!data || data.length === 0) {
-        const seedRows = SYNTHETIC_DOCTORS.map(function (d) {
-          return { id: window.crypto.randomUUID(), nombre: d.nombre, especialidad: d.especialidad };
+        const seedRows = SYNTHETIC_DOCTORS.map(function (d, i) {
+          return { id: window.crypto.randomUUID(), nombre: d.nombre, especialidad: d.especialidad, facility: CONSULTATION_FACILITIES[i % CONSULTATION_FACILITIES.length] };
         });
         await supabaseClient.from("doctors").insert(seedRows);
         data = seedRows;
       }
       StorageService.set("doctors", data.map(function (row) {
-        return { id: row.id, nombre: row.nombre, especialidad: row.especialidad };
+        return { id: row.id, nombre: row.nombre, especialidad: row.especialidad, facility: row.facility || CONSULTATION_FACILITIES[0] };
       }));
     }
   };
@@ -1771,6 +1816,30 @@ textarea:focus-visible,
      CONSULTA SERVICE — Atención médica
      ============================================================ */
   const CONSULTATION_FACILITIES = ["Policlínica Central", "Centro de Salud Norte", "Clínica Comunitaria Este"];
+
+  /* ============================================================
+     HORARIO DE OPERACIÓN — necesario para que la cita automática
+     desde Preconsulta y la reprogramación del paciente respeten
+     lo que la administración define, en vez de aceptar cualquier
+     fecha/hora.
+     ============================================================ */
+  const DAY_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+  const OperatingHoursService = {
+    listByFacility: async function (facility) {
+      if (!supabaseConfigured) return [];
+      const { data } = await supabaseClient.from("operating_hours").select("*").eq("facility", facility).order("day_of_week");
+      return data || [];
+    },
+    upsertDay: async function (facility, dayOfWeek, opensAt, closesAt, isClosed) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("operating_hours").upsert({
+        facility: facility, day_of_week: dayOfWeek,
+        opens_at: isClosed ? null : opensAt, closes_at: isClosed ? null : closesAt,
+        is_closed: isClosed, updated_at: new Date().toISOString()
+      }, { onConflict: "facility,day_of_week" });
+    }
+  };
 
   /* ============================================================
      SUPABASE SYNC — Consultas
@@ -2127,6 +2196,7 @@ textarea:focus-visible,
         await ReferralSync.pullAll();
         await WaitlistSync.pullAll();
         await QueueSync.pullAll();
+        await ReservationSync.pullAll();
         AuditLog.record("LOGIN_SUCCESS", "session", null, {});
         if (AppState.currentView === "dashboard") renderDashboard();
       } else if (status) {
@@ -3421,7 +3491,7 @@ textarea:focus-visible,
       window.location.hash = "consultas";
       renderConsultas();
     });
-    document.getElementById("cd-new-doc").addEventListener("click", function () { openNewDocumentModal(c.patientId); });
+    document.getElementById("cd-new-doc").addEventListener("click", function () { openNewDocumentModal(c.patientId, c.id); });
     const noteBtn = document.getElementById("cd-save-note");
     if (noteBtn) noteBtn.addEventListener("click", function () {
       const val = document.getElementById("cd-nota").value.trim();
@@ -3551,8 +3621,24 @@ textarea:focus-visible,
           );
         }).join("");
 
+    const pendingReservations = ReservationService.pending();
+    const pendingRows = pendingReservations.length === 0
+      ? '<tr><td colspan="4" style="padding:0;">' + UI.emptyState("Sin solicitudes pendientes", "Cuando un paciente reserve un medicamento sin existencia, aparecerá aquí para que farmacia lo resuelva.") + '</td></tr>'
+      : pendingReservations.map(function (r) {
+          return '<tr><td>' + r.patientName + '</td><td>' + r.medicationName + '</td><td class="mono">' + r.fecha + '</td>' +
+            '<td style="text-align:right;white-space:nowrap;">' +
+              '<button class="btn btn-secondary btn-sm" data-res-resolve="' + r.id + '">Marcar como resuelto</button>' +
+              '<button class="btn btn-ghost btn-sm" data-res-cancel="' + r.id + '" style="color:var(--color-danger);">Cancelar</button>' +
+            '</td></tr>';
+        }).join("");
+
     root.innerHTML =
       viewHeader("medicamentos") +
+      (supabaseConfigured ? UI.sectionBlock(
+        "Solicitudes de reserva sin stock",
+        '<span class="badge badge-warning">' + pendingReservations.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Medicamento</th><th>Fecha</th><th></th></tr></thead><tbody>' + pendingRows + '</tbody></table>'
+      ) : '') +
       '<div style="display:flex;align-items:center;gap:8px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:8px 12px;max-width:380px;margin-bottom:16px;">' +
         '<svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="color:var(--color-text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
         '<input type="text" id="med-search" placeholder="Buscar medicamento…" style="border:none;outline:none;font-size:13px;width:100%;" value="' + (filterText || "") + '">' +
@@ -3562,6 +3648,20 @@ textarea:focus-visible,
       '</div>' +
       cards;
 
+    Array.prototype.forEach.call(root.querySelectorAll("[data-res-resolve]"), function (btn) {
+      btn.addEventListener("click", function () {
+        ReservationService.updateEstado(btn.getAttribute("data-res-resolve"), "Retirado");
+        Toast.show("Solicitud marcada como resuelta.", "success");
+        renderMedicamentos(filterText);
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-res-cancel]"), function (btn) {
+      btn.addEventListener("click", function () {
+        ReservationService.updateEstado(btn.getAttribute("data-res-cancel"), "Cancelado");
+        Toast.show("Solicitud cancelada.", "success");
+        renderMedicamentos(filterText);
+      });
+    });
     document.getElementById("med-search").addEventListener("input", function (e) { renderMedicamentos(e.target.value); });
     Array.prototype.forEach.call(root.querySelectorAll("[data-copilot]"), function (btn) {
       btn.addEventListener("click", function () { openCopilotoFarmacologico(btn.getAttribute("data-copilot"), filterText); });
@@ -3618,12 +3718,25 @@ textarea:focus-visible,
   /* ============================================================
      VISTA: DOCUMENTOS
      ============================================================ */
-  function renderDocumentos(presetPatientId) {
+  function renderDocumentos(presetPatientId, sortKey, sortDir) {
     const root = document.getElementById("view-root");
     const patients = PatientService.list();
+    sortKey = sortKey || "fecha";
+    sortDir = sortDir || "desc";
     const docs = DocumentService.list()
       .filter(function (d) { return !presetPatientId || d.patientId === presetPatientId; })
-      .sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+      .sort(function (a, b) {
+        const av = sortKey === "tipo" ? docTypeLabel(a.type) : (sortKey === "paciente" ? a.patientName : a.fecha);
+        const bv = sortKey === "tipo" ? docTypeLabel(b.type) : (sortKey === "paciente" ? b.patientName : b.fecha);
+        if (av === bv) return 0;
+        const cmp = av < bv ? -1 : 1;
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+
+    const sortArrow = function (key) { return sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""; };
+    const headerCell = function (label, key) {
+      return '<th style="cursor:pointer;user-select:none;" data-sort="' + key + '">' + label + sortArrow(key) + '</th>';
+    };
 
     const rows = docs.length === 0
       ? '<tr><td colspan="5" style="padding:0;">' + UI.emptyState("Sin documentos registrados", "Los documentos generados durante una consulta aparecerán aquí.") + '</td></tr>'
@@ -3647,8 +3760,15 @@ textarea:focus-visible,
         '<button class="btn btn-primary" id="btn-new-doc">Nuevo documento</button>' +
       '</div>' +
       UI.sectionBlock("Documentos generados", '<span class="badge badge-neutral">' + docs.length + '</span>',
-        '<table class="table"><thead><tr><th>Tipo</th><th>Paciente</th><th>Fecha</th><th>Generado por</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
+        '<table class="table"><thead><tr>' + headerCell("Tipo", "tipo") + headerCell("Paciente", "paciente") + headerCell("Fecha", "fecha") + '<th>Generado por</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
 
+    Array.prototype.forEach.call(root.querySelectorAll("[data-sort]"), function (th) {
+      th.addEventListener("click", function () {
+        const key = th.getAttribute("data-sort");
+        const nextDir = (sortKey === key && sortDir === "asc") ? "desc" : "asc";
+        renderDocumentos(presetPatientId, key, nextDir);
+      });
+    });
     const clearBtn = document.getElementById("doc-clear-filter");
     if (clearBtn) clearBtn.addEventListener("click", function () {
       AppState.docFilterPatient = null;
@@ -3670,7 +3790,7 @@ textarea:focus-visible,
 
   const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB, límite estándar
 
-  function openNewDocumentModal(presetPatientId) {
+  function openNewDocumentModal(presetPatientId, consultaId) {
     const patients = PatientService.list();
     if (patients.length === 0) { Toast.show("Registra al menos un paciente antes de generar un documento.", "danger"); return; }
     Modal.open({
@@ -3708,8 +3828,29 @@ textarea:focus-visible,
       const doc = {
         id: DocumentService.nextId(), patientId: patientId, patientName: patient.nombre,
         type: tipo, contenido: contenido, fecha: new Date().toISOString().slice(0, 10),
-        autor: AppState.currentUser ? AppState.currentUser.label : "Sistema", filePath: null
+        autor: AppState.currentUser ? AppState.currentUser.label : "Sistema", filePath: null,
+        qrCode: null, signatureUrl: null, autoSigned: false
       };
+
+      // Incapacidades: código QR de verificación siempre, y firma
+      // automática si el mismo profesional completó la consulta de
+      // origen y ya tiene su firma guardada en su perfil.
+      if (tipo === "incapacidad") {
+        doc.qrCode = "NEXUS-DOC-" + doc.id;
+        if (supabaseConfigured && consultaId) {
+          const consulta = ConsultaService.get(consultaId);
+          if (consulta && consulta.estado === "Completada" && consulta.doctorId) {
+            const { data: doctorRow } = await supabaseClient.from("doctors").select("staff_id").eq("id", consulta.doctorId).single();
+            if (doctorRow && doctorRow.staff_id === currentSessionUserId) {
+              const { data: staffRow } = await supabaseClient.from("staff_profiles").select("signature_url").eq("id", currentSessionUserId).single();
+              if (staffRow && staffRow.signature_url) {
+                doc.signatureUrl = staffRow.signature_url;
+                doc.autoSigned = true;
+              }
+            }
+          }
+        }
+      }
 
       if (supabaseConfigured && file) {
         saveBtn.disabled = true;
@@ -3742,6 +3883,7 @@ textarea:focus-visible,
   async function openDocumentViewer(id) {
     const d = DocumentService.list().filter(function (x) { return x.id === id; })[0];
     if (!d) return;
+    const isIncapacidad = d.type === "incapacidad";
     Modal.open({
       title: docTypeLabel(d.type),
       body:
@@ -3755,6 +3897,16 @@ textarea:focus-visible,
           '<div style="font-size:12.5px;color:var(--color-text-muted);margin-bottom:12px;">Paciente: ' + d.patientName + '</div>' +
           '<p style="font-size:13px;line-height:1.6;white-space:pre-wrap;">' + d.contenido + '</p>' +
           (d.filePath ? '<div id="doc-file-link" style="margin-top:12px;font-size:12.5px;">Cargando archivo adjunto…</div>' : '') +
+          (isIncapacidad
+            ? '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:16px;padding-top:14px;border-top:1px dashed var(--color-border);flex-wrap:wrap;">' +
+                '<div id="doc-qr-canvas"></div>' +
+                '<div style="text-align:right;">' +
+                  (d.autoSigned && d.signatureUrl
+                    ? '<div id="doc-signature-img" style="font-size:11px;color:var(--color-text-muted);">Cargando firma…</div><div style="font-size:11px;color:var(--color-success);margin-top:4px;">Firmado automáticamente por ' + d.autor + '</div>'
+                    : '<span class="badge badge-warning">Pendiente de firma</span>') +
+                '</div>' +
+              '</div>'
+            : '') +
           '<div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--color-border);font-size:11px;color:var(--color-danger);text-align:center;">' +
             'REQUIERE FIRMA DEL PROFESIONAL PARA VALIDEZ OFICIAL' +
           '</div>' +
@@ -3771,6 +3923,17 @@ textarea:focus-visible,
       win.document.close();
       win.print();
     });
+    if (isIncapacidad && window.QRCode) {
+      const qrEl = document.getElementById("doc-qr-canvas");
+      if (qrEl) window.QRCode.toCanvas(document.createElement("canvas"), d.qrCode || d.id, { width: 120 }, function (err, canvas) {
+        if (!err) qrEl.appendChild(canvas);
+      });
+    }
+    if (isIncapacidad && d.autoSigned && d.signatureUrl && supabaseConfigured) {
+      const { data } = await supabaseClient.storage.from("signatures").createSignedUrl(d.signatureUrl, 300);
+      const sigEl = document.getElementById("doc-signature-img");
+      if (sigEl && data && data.signedUrl) sigEl.innerHTML = '<img src="' + data.signedUrl + '" alt="Firma" style="height:44px;">';
+    }
     if (d.filePath && supabaseConfigured) {
       const { data } = await supabaseClient.storage.from("documents").createSignedUrl(d.filePath, 300);
       const linkEl = document.getElementById("doc-file-link");
@@ -4009,6 +4172,48 @@ textarea:focus-visible,
     );
   }
 
+  function wireOperatingHoursCard() {
+    const facilitySelect = document.getElementById("oh-facility");
+    const grid = document.getElementById("oh-grid");
+
+    async function loadGrid() {
+      grid.textContent = "Cargando…";
+      const facility = facilitySelect.value;
+      const rows = await OperatingHoursService.listByFacility(facility);
+      const byDay = {};
+      rows.forEach(function (r) { byDay[r.day_of_week] = r; });
+
+      grid.innerHTML = '<table class="table"><thead><tr><th>Día</th><th>Abre</th><th>Cierra</th><th>Cerrado</th><th></th></tr></thead><tbody>' +
+        DAY_NAMES.map(function (name, dow) {
+          const existing = byDay[dow];
+          return '<tr data-day-row="' + dow + '">' +
+            '<td>' + name + '</td>' +
+            '<td><input type="time" data-oh-opens value="' + (existing && existing.opens_at ? existing.opens_at.slice(0, 5) : "08:00") + '" style="border:1px solid var(--color-border);border-radius:6px;padding:4px 6px;"></td>' +
+            '<td><input type="time" data-oh-closes value="' + (existing && existing.closes_at ? existing.closes_at.slice(0, 5) : "17:00") + '" style="border:1px solid var(--color-border);border-radius:6px;padding:4px 6px;"></td>' +
+            '<td><input type="checkbox" data-oh-closed ' + (existing && existing.is_closed ? "checked" : "") + '></td>' +
+            '<td><button class="btn btn-ghost btn-sm" data-oh-save="' + dow + '">Guardar</button></td>' +
+          '</tr>';
+        }).join("") + '</tbody></table>';
+
+      Array.prototype.forEach.call(grid.querySelectorAll("[data-oh-save]"), function (btn) {
+        btn.addEventListener("click", async function () {
+          const dow = parseInt(btn.getAttribute("data-oh-save"), 10);
+          const row = grid.querySelector('[data-day-row="' + dow + '"]');
+          const opens = row.querySelector("[data-oh-opens]").value;
+          const closes = row.querySelector("[data-oh-closes]").value;
+          const closed = row.querySelector("[data-oh-closed]").checked;
+          btn.textContent = "Guardando…";
+          await OperatingHoursService.upsertDay(facilitySelect.value, dow, opens, closes, closed);
+          btn.textContent = "Guardado ✓";
+          window.setTimeout(function () { btn.textContent = "Guardar"; }, 1500);
+        });
+      });
+    }
+
+    facilitySelect.addEventListener("change", loadGrid);
+    loadGrid();
+  }
+
   function wireStaffManagementCard() {
     document.getElementById("btn-load-audit").addEventListener("click", async function () {
       const listEl = document.getElementById("audit-log-list");
@@ -4151,7 +4356,23 @@ textarea:focus-visible,
         '</div>' +
       '</div>' +
 
+      (supabaseConfigured ? '<div class="card" style="margin-bottom:20px;">' +
+        '<div class="card-title">Mi firma</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Se usa para firmar automáticamente las incapacidades de las consultas que completes tú mismo.</div>' +
+        '<input type="file" id="signature-file" accept="image/png,image/jpeg" style="margin-bottom:10px;">' +
+        '<div><button class="btn btn-secondary btn-sm" id="signature-save">Guardar firma</button></div>' +
+        '<div id="signature-status" style="font-size:12px;color:var(--color-text-muted);margin-top:8px;"></div>' +
+      '</div>' : '') +
+
       (isAdmin && supabaseConfigured ? renderStaffManagementCard() : '') +
+      (isAdmin && supabaseConfigured ? '<div class="card" id="operating-hours-card" style="margin-bottom:20px;">' +
+        '<div class="card-title">Horario de operación</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Define cuándo opera cada instalación. La cita automática desde Preconsulta y la reprogramación del paciente respetan esto.</div>' +
+        '<div class="form-field"><label>Instalación</label><select id="oh-facility">' +
+          CONSULTATION_FACILITIES.map(function (f) { return '<option value="' + f + '">' + f + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div id="oh-grid">Cargando…</div>' +
+      '</div>' : '') +
 
       '<div class="card" style="margin-bottom:20px;">' +
         '<div class="card-title">Entorno</div>' +
@@ -4164,6 +4385,21 @@ textarea:focus-visible,
       '</div>';
 
     if (isAdmin && supabaseConfigured) wireStaffManagementCard();
+    if (isAdmin && supabaseConfigured) wireOperatingHoursCard();
+
+    const sigSaveBtn = document.getElementById("signature-save");
+    if (sigSaveBtn) sigSaveBtn.addEventListener("click", async function () {
+      const fileInput = document.getElementById("signature-file");
+      const file = fileInput.files[0];
+      const status = document.getElementById("signature-status");
+      if (!file) { status.textContent = "Selecciona una imagen primero."; return; }
+      status.textContent = "Guardando…";
+      const path = currentSessionUserId + "/firma.png";
+      const { error: upErr } = await supabaseClient.storage.from("signatures").upload(path, file, { upsert: true });
+      if (upErr) { status.textContent = "No se pudo guardar: " + upErr.message; return; }
+      await supabaseClient.from("staff_profiles").update({ signature_url: path }).eq("id", currentSessionUserId);
+      status.textContent = "Firma guardada.";
+    });
 
     document.getElementById("cfg-switch-role").addEventListener("click", function () {
       document.getElementById("btn-switch-role").click();

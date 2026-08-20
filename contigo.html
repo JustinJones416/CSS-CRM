@@ -401,6 +401,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -476,6 +477,18 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   };
 
   let currentPatient = null;
+  const CONSULTATION_FACILITIES_PORTAL = ["Policlínica Central", "Centro de Salud Norte", "Clínica Comunitaria Este"];
+  let docFilterType = null;
+  const DOC_FILTER_CHIPS = [
+    { value: null, label: "Todos" },
+    { value: "receta", label: "Recetas" },
+    { value: "orden_laboratorio", label: "Órdenes de laboratorio" },
+    { value: "orden_imagen", label: "Órdenes de imagen" },
+    { value: "incapacidad", label: "Incapacidades" },
+    { value: "referencia", label: "Referencias" },
+    { value: "resumen_consulta", label: "Resúmenes" },
+    { value: "aporte_paciente", label: "Aportados por ti" }
+  ];
 
   function initLoginSelect() {
     const patients = StorageService.get("patients", []);
@@ -545,7 +558,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           id: row.id, patientId: row.patient_id, patientName: currentPatient ? currentPatient.nombre : "",
           type: row.type, contenido: row.contenido, autor: row.autor,
           origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10),
-          filePath: row.file_path || null
+          filePath: row.file_path || null,
+          qrCode: row.qr_code || null, signatureUrl: row.signature_url || null, autoSigned: !!row.auto_signed
         };
       }));
     }
@@ -770,6 +784,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       return a.fecha >= today && a.estado !== "Cancelada" && a.estado !== "Completada";
     })[0];
     const docs = StorageService.get("documents", []).filter(function (d) { return d.patientId === p.id; });
+    const docsFiltered = docFilterType ? docs.filter(function (d) { return d.type === docFilterType; }) : docs;
     const meds = StorageService.get("medications", []).filter(function (m) {
       return p.medicamentos.some(function (name) { return m.name && name.toLowerCase().indexOf(m.name.toLowerCase()) !== -1; });
     });
@@ -822,6 +837,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
                     '<div><div class="p-list-item__title">' + a.doctorName + '</div><div class="p-list-item__sub">' + a.especialidad + ' · ' + formatFecha(a.fecha) + ' · ' + a.hora + ' · ' + a.modalidad + '</div></div>' +
                     '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">' +
                       '<span class="p-badge ' + statusBadge(a.estado) + '">' + a.estado + '</span>' +
+                      (cancelable && supabaseConfigured ? '<button class="btn btn-ghost btn-sm" data-reschedule-appt="' + a.id + '" style="padding:4px 8px;font-size:11.5px;">Cambiar horario</button>' : '') +
                       (cancelable && supabaseConfigured ? '<button class="btn btn-ghost btn-sm" data-cancel-appt="' + a.id + '" style="color:var(--color-danger);padding:4px 8px;font-size:11.5px;">Cancelar</button>' : '') +
                     '</div>' +
                   '</div>';
@@ -839,9 +855,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
                     (matches.length === 0
                       ? '<div class="p-list-item__sub">Disponibilidad no registrada todavía.</div>'
                       : matches.map(function (m) {
-                          return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;">' +
+                          const available = m.status === "Disponible";
+                          return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 0;gap:8px;">' +
                             '<span class="p-list-item__sub">' + m.facility + ' · ' + m.stock + ' unid.</span>' +
-                            '<span class="p-badge ' + (m.status === "Disponible" ? "p-badge-ok" : m.status === "Agotado" ? "p-badge-danger" : "p-badge-warn") + '">' + m.status + '</span>' +
+                            '<span style="display:flex;align-items:center;gap:6px;">' +
+                              '<span class="p-badge ' + (available ? "p-badge-ok" : m.status === "Agotado" ? "p-badge-danger" : "p-badge-warn") + '">' + m.status + '</span>' +
+                              (supabaseConfigured ? '<button class="btn btn-secondary btn-sm" data-reserve-med="' + m.id + '" style="padding:4px 8px;font-size:11px;">Reservar</button>' : '') +
+                            '</span>' +
                           '</div>';
                         }).join("")) +
                   '</div>';
@@ -854,9 +874,15 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
               '<h3 style="margin-bottom:0;">Documentos</h3>' +
               '<button class="btn btn-secondary btn-sm" id="btn-upload-doc">Aportar documento</button>' +
             '</div>' +
-            (docs.length === 0
-              ? '<div class="p-empty">No tienes documentos disponibles todavía.</div>'
-              : docs.map(function (d) {
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;overflow-x:auto;">' +
+              DOC_FILTER_CHIPS.map(function (chip) {
+                const active = docFilterType === chip.value;
+                return '<button type="button" class="p-badge ' + (active ? "p-badge-info" : "p-badge-neutral") + '" data-doc-filter="' + (chip.value || "") + '" style="border:none;cursor:pointer;">' + chip.label + '</button>';
+              }).join("") +
+            '</div>' +
+            (docsFiltered.length === 0
+              ? '<div class="p-empty">No tienes documentos de este tipo todavía.</div>'
+              : docsFiltered.map(function (d) {
                   return '<div class="p-list-item" style="cursor:pointer;" data-doc="' + d.id + '">' +
                     '<div><div class="p-list-item__title">' + docTypeLabelPortal(d.type) + (d.origen === "paciente" ? ' <span class="p-badge p-badge-info" style="margin-left:6px;">Tuyo</span>' : '') + '</div><div class="p-list-item__sub">' + formatFecha(d.fecha) + ' · ' + d.autor + '</div></div>' +
                     '<span class="p-badge p-badge-info">Ver →</span>' +
@@ -941,12 +967,43 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     Array.prototype.forEach.call(main.querySelectorAll("[data-doc]"), function (row) {
       row.addEventListener("click", function () { openDocViewer(row.getAttribute("data-doc")); });
     });
+    Array.prototype.forEach.call(main.querySelectorAll("[data-doc-filter]"), function (btn) {
+      btn.addEventListener("click", function () {
+        docFilterType = btn.getAttribute("data-doc-filter") || null;
+        renderPortalBody(null);
+      });
+    });
     Array.prototype.forEach.call(main.querySelectorAll("[data-scroll]"), function (el) {
       el.addEventListener("click", function () {
         document.getElementById(el.getAttribute("data-scroll")).scrollIntoView({ behavior: "smooth", block: "start" });
       });
     });
     document.getElementById("btn-upload-doc").addEventListener("click", openUploadDocModal);
+    Array.prototype.forEach.call(main.querySelectorAll("[data-reserve-med]"), function (btn) {
+      btn.addEventListener("click", async function () {
+        const medId = btn.getAttribute("data-reserve-med");
+        const med = meds.filter(function (m) { return m.id === medId; })[0];
+        const available = med && med.status === "Disponible";
+        btn.disabled = true;
+        btn.textContent = "Reservando…";
+        const { error } = await supabaseClient.from("medication_reservations").insert({
+          patient_id: p.id, medication_id: medId, cantidad: 1,
+          estado: available ? "Reservado" : "Sin stock (pendiente)"
+        });
+        if (error) {
+          Toast_showLocal("No se pudo reservar. Intenta de nuevo.");
+          btn.disabled = false;
+          btn.textContent = "Reservar";
+          return;
+        }
+        pushTimelineEvent({ patientId: p.id, type: "medicamento", title: "Medicamento reservado por el paciente", description: (med ? med.name : "") + (available ? "" : " (sin existencia, en espera)"), actor: p.nombre });
+        Toast_showLocal(available ? "Reservado. Puedes retirarlo en la instalación." : "No hay existencia ahora mismo. Tu solicitud quedó registrada y el equipo de farmacia te contactará.");
+        btn.textContent = "Reservado";
+      });
+    });
+    Array.prototype.forEach.call(main.querySelectorAll("[data-reschedule-appt]"), function (btn) {
+      btn.addEventListener("click", function () { openRescheduleAppointmentModal(btn.getAttribute("data-reschedule-appt")); });
+    });
     Array.prototype.forEach.call(main.querySelectorAll("[data-cancel-appt]"), function (btn) {
       btn.addEventListener("click", async function () {
         if (!window.confirm("¿Seguro que quieres cancelar esta cita?")) return;
@@ -999,6 +1056,62 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
      re-pintar el formulario completo, así el resto de lo que el
      paciente ya escribió nunca se pierde. */
   let pcTags = { antecedentes: [], medicamentos: [], alergias: [], archivos: [] };
+  let pcBodyZones = [];
+
+  const BODY_ZONE_LABELS = {
+    cabeza: "Cabeza", torso_sup: "Torso superior", torso_inf: "Torso inferior",
+    brazo_izq: "Brazo izquierdo", brazo_der: "Brazo derecho",
+    pierna_izq: "Pierna izquierda", pierna_der: "Pierna derecha", espalda: "Espalda"
+  };
+
+  /* Silueta simplificada, sin ilustración de terceros: formas básicas
+     propias, no un asset con licencia. Cada zona tiene un área de
+     toque más grande que su forma visual, para cumplir el mínimo de
+     44px táctiles reales en móvil aunque el trazo del SVG sea fino. */
+  function bodyMapSVG() {
+    const zones = [
+      { id: "cabeza", cx: 60, cy: 20, r: 14 },
+      { id: "torso_sup", x: 40, y: 38, w: 40, h: 34 },
+      { id: "torso_inf", x: 40, y: 74, w: 40, h: 30 },
+      { id: "brazo_izq", x: 18, y: 40, w: 18, h: 60 },
+      { id: "brazo_der", x: 84, y: 40, w: 18, h: 60 },
+      { id: "pierna_izq", x: 42, y: 106, w: 17, h: 60 },
+      { id: "pierna_der", x: 61, y: 106, w: 17, h: 60 },
+      { id: "espalda", x: 40, y: 38, w: 40, h: 30, hidden: true } // referenciada por texto, no visual duplicada
+    ];
+    const visible = zones.filter(function (z) { return !z.hidden; });
+    return (
+      '<div style="display:flex;justify-content:center;background:var(--color-surface-muted);border-radius:var(--radius-md);padding:14px 0;">' +
+        '<svg viewBox="0 0 128 170" width="150" height="200" role="img" aria-label="Silueta del cuerpo para señalar zonas">' +
+          visible.map(function (z) {
+            const shape = z.r
+              ? '<circle cx="' + z.cx + '" cy="' + z.cy + '" r="' + z.r + '" />'
+              : '<rect x="' + z.x + '" y="' + z.y + '" width="' + z.w + '" height="' + z.h + '" rx="8" />';
+            return '<g data-body-zone="' + z.id + '" style="cursor:pointer;">' +
+              '<g fill="var(--color-primary-soft)" stroke="var(--color-primary)" stroke-width="1.5" class="body-zone-shape" data-zone-shape="' + z.id + '">' + shape + '</g>' +
+            '</g>';
+          }).join("") +
+        '</svg>' +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px;">' +
+        '<button type="button" class="p-badge p-badge-neutral" data-body-zone="espalda" style="border:none;cursor:pointer;">+ Espalda</button>' +
+      '</div>'
+    );
+  }
+
+  function toggleBodyZone(zoneId) {
+    const idx = pcBodyZones.indexOf(zoneId);
+    if (idx === -1) pcBodyZones.push(zoneId); else pcBodyZones.splice(idx, 1);
+    const shape = document.querySelector('[data-zone-shape="' + zoneId + '"]');
+    if (shape) shape.setAttribute("fill", pcBodyZones.indexOf(zoneId) !== -1 ? "var(--color-primary)" : "var(--color-primary-soft)");
+    const summary = document.getElementById("body-zones-summary");
+    if (summary) {
+      summary.textContent = pcBodyZones.length === 0
+        ? "Nada seleccionado todavía."
+        : "Zonas señaladas: " + pcBodyZones.map(function (z) { return BODY_ZONE_LABELS[z]; }).join(", ");
+    }
+  }
+
 
   function tagFieldHTML(key, label, placeholder, isFile) {
     return (
@@ -1080,6 +1193,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
   function renderPreconsultaScreen() {
     pcTags = { antecedentes: [], medicamentos: [], alergias: [], archivos: [] };
+    pcBodyZones = [];
     const main = document.getElementById("portal-main");
     main.innerHTML =
       '<button class="btn btn-ghost" id="pc-cancel" style="padding-left:0;margin-bottom:14px;">← Cancelar y volver</button>' +
@@ -1106,6 +1220,13 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           '</div>' +
         '</div>' +
 
+        '<div class="field">' +
+          '<label>¿Dónde lo sientes?</label>' +
+          '<div style="font-size:11.5px;color:var(--color-text-faint);margin-bottom:8px;">Toca una o varias zonas del cuerpo.</div>' +
+          bodyMapSVG() +
+          '<div id="body-zones-summary" style="font-size:12px;color:var(--color-text-muted);margin-top:8px;">Nada seleccionado todavía.</div>' +
+        '</div>' +
+
         tagFieldHTML("antecedentes", "Antecedentes", "Ej. Hipertensión") +
         tagFieldHTML("medicamentos", "Medicamentos actuales", "Ej. Losartán 50 mg") +
         tagFieldHTML("alergias", "Alergias", "Ej. Penicilina") +
@@ -1123,6 +1244,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
       wireTagAdd(key);
     });
     wireTagList("archivos");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-body-zone]"), function (el) {
+      el.addEventListener("click", function () { toggleBodyZone(el.getAttribute("data-body-zone")); });
+    });
     document.getElementById("tag-file-archivos").addEventListener("change", function (e) {
       Array.prototype.forEach.call(e.target.files, function (file) { pcTags.archivos.push(file.name); });
       updateTagList("archivos");
@@ -1146,6 +1270,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
         medicamentos: pcTags.medicamentos.slice(),
         alergias: pcTags.alergias.slice(),
         archivos: pcTags.archivos.slice(),
+        zonasCorporales: pcBodyZones.slice(),
         estado: "Pendiente", origen: "paciente",
         fecha: new Date().toISOString().slice(0, 10)
       };
@@ -1161,10 +1286,54 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
           sintomas: entry.sintomas, duracion: entry.duracion, intensidad: String(entry.intensidad || ""),
           antecedentes: toArr(entry.antecedentes), medicamentos: toArr(entry.medicamentos),
           alergias: toArr(entry.alergias), archivos: toArr(entry.archivos),
+          zonas_corporales: toArr(entry.zonasCorporales),
           estado: entry.estado, origen: "paciente"
         });
+        await autoCreateAppointmentFromPreconsulta(entry);
       }
       window.history.back();
+    });
+  }
+
+  /* Al enviar la preconsulta, se genera automáticamente una cita en
+     estado "Programada", respetando el horario de operación de la
+     instalación. El paciente la puede gestionar después desde "Mis
+     citas" (cambiar horario, cancelar), sujeto a esas mismas reglas. */
+  async function autoCreateAppointmentFromPreconsulta(preconsulta) {
+    const facility = CONSULTATION_FACILITIES_PORTAL[0];
+    const { data: doctors } = await supabaseClient.from("doctors").select("*").eq("facility", facility);
+    if (!doctors || doctors.length === 0) return;
+    const doctor = doctors.filter(function (d) { return d.especialidad === "Medicina general"; })[0] || doctors[0];
+
+    const { data: hours } = await supabaseClient.from("operating_hours").select("*").eq("facility", facility);
+    const byDay = {};
+    (hours || []).forEach(function (h) { byDay[h.day_of_week] = h; });
+
+    let fecha = null, hora = null;
+    for (let i = 1; i <= 14; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      const dow = d.getDay();
+      const h = byDay[dow];
+      if (h && !h.is_closed && h.opens_at) {
+        fecha = d.toISOString().slice(0, 10);
+        hora = h.opens_at.slice(0, 5);
+        break;
+      }
+    }
+    if (!fecha) return; // sin horario configurado todavía, no se genera cita a ciegas
+
+    const apptId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : "CITA-" + Date.now();
+    await supabaseClient.from("appointments").insert({
+      id: apptId, patient_id: preconsulta.patientId, doctor_id: doctor.id,
+      especialidad: doctor.especialidad, modalidad: "Presencial",
+      fecha: fecha, hora: hora, estado: "Programada", preconsulta_id: preconsulta.id
+    });
+    pushTimelineEvent({
+      patientId: preconsulta.patientId, type: "cita",
+      title: "Cita generada automáticamente desde tu preconsulta",
+      description: doctor.nombre + " · " + facility + " · " + fecha + " " + hora,
+      actor: "Sistema"
     });
   }
 
@@ -1367,19 +1536,58 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     return parts[2] + " " + meses[parseInt(parts[1], 10) - 1] + " " + parts[0];
   }
 
+  function openRescheduleAppointmentModal(apptId) {
+    openModal(
+      "Cambiar horario",
+      '<div class="field"><label>Nueva fecha</label><input type="date" id="rs-fecha" min="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+      '<div class="field"><label>Nueva hora</label><input type="time" id="rs-hora"></div>' +
+      '<p style="font-size:11.5px;color:var(--color-text-faint);">Solo se puede elegir dentro del horario de operación de la instalación.</p>' +
+      '<div id="rs-status" style="font-size:12px;color:var(--color-danger);"></div>',
+      '<button class="btn btn-primary btn-block" id="rs-save">Guardar</button>'
+    );
+    document.getElementById("rs-save").addEventListener("click", async function () {
+      const fecha = document.getElementById("rs-fecha").value;
+      const hora = document.getElementById("rs-hora").value;
+      const status = document.getElementById("rs-status");
+      if (!fecha || !hora) { status.textContent = "Selecciona fecha y hora."; return; }
+      const { error } = await supabaseClient.rpc("reschedule_own_appointment", { appt_id: apptId, new_fecha: fecha, new_hora: hora });
+      if (error) { status.textContent = error.message || "No se pudo reprogramar."; return; }
+      const list = StorageService.get("appointments", []).map(function (a) {
+        return a.id === apptId ? Object.assign({}, a, { fecha: fecha, hora: hora, estado: "Confirmada" }) : a;
+      });
+      StorageService.set("appointments", list);
+      document.getElementById("modal-overlay").classList.remove("active");
+      Toast_showLocal("Cita reprogramada.");
+      renderPortal();
+    });
+  }
+
   async function openDocViewer(id) {
     const d = StorageService.get("documents", []).filter(function (x) { return x.id === id; })[0];
     if (!d) return;
+    const isIncapacidad = d.type === "incapacidad";
     openModal(
       docTypeLabelPortal(d.type),
       '<div style="border:1px solid var(--color-border);border-radius:12px;padding:18px;">' +
         '<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:10px;">' + formatFecha(d.fecha) + ' · ' + d.autor + '</div>' +
         '<p style="font-size:13.5px;line-height:1.6;white-space:pre-wrap;">' + d.contenido + '</p>' +
         (d.filePath ? '<div id="doc-file-link" style="margin-top:10px;font-size:12.5px;color:var(--color-text-muted);">Cargando archivo adjunto…</div>' : '') +
+        (isIncapacidad
+          ? '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:14px;padding-top:12px;border-top:1px dashed var(--color-border);flex-wrap:wrap;">' +
+              '<div id="doc-qr-canvas"></div>' +
+              (d.autoSigned ? '<span class="p-badge p-badge-ok">Firmado automáticamente</span>' : '<span class="p-badge p-badge-warn">Pendiente de firma</span>') +
+            '</div>'
+          : '') +
         '<div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--color-border);font-size:11px;color:var(--color-danger);text-align:center;">REQUIERE FIRMA DEL PROFESIONAL PARA VALIDEZ OFICIAL</div>' +
       '</div>',
       '<button class="btn btn-primary btn-block" onclick="document.getElementById(\'modal-overlay\').classList.remove(\'active\')">Cerrar</button>'
     );
+    if (isIncapacidad && window.QRCode) {
+      const qrEl = document.getElementById("doc-qr-canvas");
+      if (qrEl) window.QRCode.toCanvas(document.createElement("canvas"), d.qrCode || d.id, { width: 110 }, function (err, canvas) {
+        if (!err) qrEl.appendChild(canvas);
+      });
+    }
     if (d.filePath && supabaseConfigured) {
       const { data } = await supabaseClient.storage.from("documents").createSignedUrl(d.filePath, 300);
       const linkEl = document.getElementById("doc-file-link");
