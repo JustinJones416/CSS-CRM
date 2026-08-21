@@ -1271,24 +1271,41 @@ textarea:focus-visible,
         return {
           id: row.id, patientId: row.patient_id, patientName: pat ? pat.nombre : "Paciente",
           medicationId: row.medication_id, medicationName: med ? med.name : "Medicamento",
-          cantidad: row.cantidad, estado: row.estado, fecha: (row.created_at || "").slice(0, 10)
+          cantidad: row.cantidad, estado: row.estado, fecha: (row.created_at || "").slice(0, 10),
+          scheduledRestockDate: row.scheduled_restock_date || null, notas: row.notas || ""
         };
       }));
     },
     pushEstado: async function (id, estado) {
       if (!supabaseConfigured) return;
       await supabaseClient.from("medication_reservations").update({ estado: estado }).eq("id", id);
+    },
+    pushSchedule: async function (id, date, notas) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("medication_reservations").update({
+        scheduled_restock_date: date, notas: notas, estado: "Agendado"
+      }).eq("id", id);
     }
   };
 
   const ReservationService = {
     list: function () { return StorageService.get("reservations", []); },
     pending: function () { return ReservationService.list().filter(function (r) { return r.estado === "Sin stock (pendiente)"; }); },
+    byMedication: function (medicationId) {
+      return ReservationService.list().filter(function (r) { return r.medicationId === medicationId; });
+    },
     updateEstado: function (id, estado) {
       const result = StorageService.update("reservations", function (list) {
         return (list || []).map(function (r) { return r.id === id ? Object.assign({}, r, { estado: estado }) : r; });
       }, []);
       ReservationSync.pushEstado(id, estado);
+      return result;
+    },
+    updateSchedule: function (id, date, notas) {
+      const result = StorageService.update("reservations", function (list) {
+        return (list || []).map(function (r) { return r.id === id ? Object.assign({}, r, { scheduledRestockDate: date, notas: notas, estado: "Agendado" }) : r; });
+      }, []);
+      ReservationSync.pushSchedule(id, date, notas);
       return result;
     }
   };
@@ -3641,13 +3658,16 @@ textarea:focus-visible,
       ? UI.emptyState("Sin coincidencias", "Ningún medicamento coincide con la búsqueda.")
       : names.map(function (m) {
           const rows = MedicationService.byName(m.name);
+          const assignedPatients = PatientService.list().filter(function (p) {
+            return (p.medicamentos || []).some(function (name) { return name.toLowerCase().indexOf(m.name.toLowerCase()) !== -1; });
+          });
           return (
             '<div class="card" style="margin-bottom:12px;">' +
               '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;">' +
                 '<div><div class="card-title">' + m.name + '</div><div class="card-sub">' + m.presentation + '</div></div>' +
                 '<button class="btn btn-secondary btn-sm" data-copilot="' + m.name + '">Copiloto farmacológico</button>' +
               '</div>' +
-              '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">' +
+              '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:10px;">' +
                 rows.map(function (r) {
                   return (
                     '<div style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:10px 12px;">' +
@@ -3660,20 +3680,40 @@ textarea:focus-visible,
                   );
                 }).join("") +
               '</div>' +
+              '<details style="border-top:1px solid var(--color-border);padding-top:10px;">' +
+                '<summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--color-text-muted);">Pacientes asignados (' + assignedPatients.length + ')</summary>' +
+                '<div style="margin-top:8px;">' +
+                  (assignedPatients.length === 0
+                    ? '<div style="font-size:12px;color:var(--color-text-faint);">Ningún paciente tiene este medicamento registrado en su ficha.</div>'
+                    : assignedPatients.map(function (p) {
+                        return '<div class="p-list-item-like" data-goto-patient-med="' + p.id + '" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--color-border);cursor:pointer;">' +
+                          '<span style="font-size:12.5px;">' + p.nombre + '</span>' +
+                          '<span class="badge ' + statusBadgeClass(p.estado) + '" style="font-size:10.5px;">' + p.estado + '</span>' +
+                        '</div>';
+                      }).join("")) +
+                '</div>' +
+              '</details>' +
             '</div>'
           );
         }).join("");
 
     const pendingReservations = ReservationService.pending();
+    const scheduledReservations = ReservationService.list().filter(function (r) { return r.estado === "Agendado"; });
     const pendingRows = pendingReservations.length === 0
       ? '<tr><td colspan="4" style="padding:0;">' + UI.emptyState("Sin solicitudes pendientes", "Cuando un paciente reserve un medicamento sin existencia, aparecerá aquí para que farmacia lo resuelva.") + '</td></tr>'
       : pendingReservations.map(function (r) {
           return '<tr><td>' + r.patientName + '</td><td>' + r.medicationName + '</td><td class="mono">' + r.fecha + '</td>' +
             '<td style="text-align:right;white-space:nowrap;">' +
-              '<button class="btn btn-secondary btn-sm" data-res-resolve="' + r.id + '">Marcar como resuelto</button>' +
+              '<button class="btn btn-secondary btn-sm" data-res-schedule="' + r.id + '">Agendar reposición</button>' +
+              '<button class="btn btn-ghost btn-sm" data-res-resolve="' + r.id + '">Marcar como resuelto</button>' +
               '<button class="btn btn-ghost btn-sm" data-res-cancel="' + r.id + '" style="color:var(--color-danger);">Cancelar</button>' +
             '</td></tr>';
         }).join("");
+    const scheduledRows = scheduledReservations.length === 0 ? "" : scheduledReservations.map(function (r) {
+      return '<tr><td>' + r.patientName + '</td><td>' + r.medicationName + '</td><td class="mono">' + (r.scheduledRestockDate || "—") + '</td>' +
+        '<td>' + (r.notas || "") + '</td>' +
+        '<td style="text-align:right;white-space:nowrap;"><button class="btn btn-secondary btn-sm" data-res-resolve="' + r.id + '">Marcar como resuelto</button></td></tr>';
+    }).join("");
 
     root.innerHTML =
       viewHeader("medicamentos") +
@@ -3681,6 +3721,11 @@ textarea:focus-visible,
         "Solicitudes de reserva sin stock",
         '<span class="badge badge-warning">' + pendingReservations.length + '</span>',
         '<table class="table"><thead><tr><th>Paciente</th><th>Medicamento</th><th>Fecha</th><th></th></tr></thead><tbody>' + pendingRows + '</tbody></table>'
+      ) : '') +
+      (supabaseConfigured && scheduledReservations.length > 0 ? UI.sectionBlock(
+        "Reposiciones agendadas",
+        '<span class="badge badge-accent">' + scheduledReservations.length + '</span>',
+        '<table class="table"><thead><tr><th>Paciente</th><th>Medicamento</th><th>Fecha estimada</th><th>Notas</th><th></th></tr></thead><tbody>' + scheduledRows + '</tbody></table>'
       ) : '') +
       '<div style="display:flex;align-items:center;gap:8px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:8px 12px;max-width:380px;margin-bottom:16px;">' +
         '<svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="color:var(--color-text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
@@ -3691,6 +3736,9 @@ textarea:focus-visible,
       '</div>' +
       cards;
 
+    Array.prototype.forEach.call(root.querySelectorAll("[data-res-schedule]"), function (btn) {
+      btn.addEventListener("click", function () { openScheduleRestockModal(btn.getAttribute("data-res-schedule"), filterText); });
+    });
     Array.prototype.forEach.call(root.querySelectorAll("[data-res-resolve]"), function (btn) {
       btn.addEventListener("click", function () {
         ReservationService.updateEstado(btn.getAttribute("data-res-resolve"), "Retirado");
@@ -3708,6 +3756,31 @@ textarea:focus-visible,
     document.getElementById("med-search").addEventListener("input", function (e) { renderMedicamentos(e.target.value); });
     Array.prototype.forEach.call(root.querySelectorAll("[data-copilot]"), function (btn) {
       btn.addEventListener("click", function () { openCopilotoFarmacologico(btn.getAttribute("data-copilot"), filterText); });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll("[data-goto-patient-med]"), function (el) {
+      el.addEventListener("click", function () { navigateToPatient(el.getAttribute("data-goto-patient-med")); });
+    });
+  }
+
+  function openScheduleRestockModal(reservationId, filterText) {
+    Modal.open({
+      title: "Agendar reposición",
+      body:
+        '<div class="form-field"><label>Fecha estimada de reposición</label><input type="date" id="rst-fecha" min="' + new Date().toISOString().slice(0, 10) + '"></div>' +
+        '<div class="form-field"><label>Notas (opcional)</label><input type="text" id="rst-notas" placeholder="Ej. Llega con el próximo pedido a Farmacia Central"></div>',
+      foot:
+        '<button class="btn btn-secondary" id="rst-cancel">Cancelar</button>' +
+        '<button class="btn btn-primary" id="rst-save">Guardar</button>'
+    });
+    document.getElementById("rst-cancel").addEventListener("click", Modal.close);
+    document.getElementById("rst-save").addEventListener("click", function () {
+      const fecha = document.getElementById("rst-fecha").value;
+      if (!fecha) { Toast.show("Selecciona una fecha estimada.", "danger"); return; }
+      const notas = document.getElementById("rst-notas").value.trim();
+      ReservationService.updateSchedule(reservationId, fecha, notas);
+      Modal.close();
+      Toast.show("Reposición agendada.", "success");
+      renderMedicamentos(filterText);
     });
   }
 
