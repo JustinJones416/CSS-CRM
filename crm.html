@@ -1492,7 +1492,8 @@ textarea:focus-visible,
           type: row.type, contenido: row.contenido, autor: row.autor,
           origen: row.origen || "personal", fecha: (row.created_at || "").slice(0, 10),
           filePath: row.file_path || null,
-          qrCode: row.qr_code || null, signatureUrl: row.signature_url || null, autoSigned: !!row.auto_signed
+          qrCode: row.qr_code || null, signatureUrl: row.signature_url || null, autoSigned: !!row.auto_signed,
+          version: row.version || 1, parentDocumentId: row.parent_document_id || null, status: row.status || "vigente"
         };
       }));
     },
@@ -1502,15 +1503,42 @@ textarea:focus-visible,
         id: entry.id, patient_id: entry.patientId, type: entry.type,
         contenido: entry.contenido, autor: entry.autor, origen: entry.origen || "personal",
         file_path: entry.filePath || null,
-        qr_code: entry.qrCode || null, signature_url: entry.signatureUrl || null, auto_signed: !!entry.autoSigned
+        qr_code: entry.qrCode || null, signature_url: entry.signatureUrl || null, auto_signed: !!entry.autoSigned,
+        version: entry.version || 1, parent_document_id: entry.parentDocumentId || null, status: entry.status || "vigente"
       });
+    },
+    pushStatus: async function (id, status) {
+      if (!supabaseConfigured) return;
+      await supabaseClient.from("documents").update({ status: status }).eq("id", id);
     }
   };
 
   const DocumentService = {
     list: function () { return StorageService.get("documents", []); },
+    listVigentes: function (patientId) {
+      return DocumentService.list().filter(function (d) {
+        return d.status !== "reemplazado" && (!patientId || d.patientId === patientId);
+      });
+    },
     byPatient: function (patientId) {
       return DocumentService.list().filter(function (d) { return d.patientId === patientId; });
+    },
+    versionHistory: function (docId) {
+      const doc = DocumentService.list().filter(function (d) { return d.id === docId; })[0];
+      if (!doc) return [];
+      const rootId = doc.parentDocumentId ? DocumentService.findRootId(docId) : docId;
+      return DocumentService.list()
+        .filter(function (d) { return d.id === rootId || d.parentDocumentId === rootId || DocumentService.findRootId(d.id) === rootId; })
+        .sort(function (a, b) { return a.version - b.version; });
+    },
+    findRootId: function (docId) {
+      let current = DocumentService.list().filter(function (d) { return d.id === docId; })[0];
+      let guard = 0;
+      while (current && current.parentDocumentId && guard < 10) {
+        current = DocumentService.list().filter(function (d) { return d.id === current.parentDocumentId; })[0];
+        guard++;
+      }
+      return current ? current.id : docId;
     },
     nextId: function () {
       if (supabaseConfigured && window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
@@ -1523,6 +1551,26 @@ textarea:focus-visible,
         return list;
       }, []);
       DocumentSync.pushCreate(entry);
+      return result;
+    },
+    createNewVersion: function (originalDoc, newContenido, autor) {
+      const newVersion = {
+        id: DocumentService.nextId(), patientId: originalDoc.patientId, patientName: originalDoc.patientName,
+        type: originalDoc.type, contenido: newContenido, fecha: new Date().toISOString().slice(0, 10),
+        autor: autor, filePath: null, qrCode: originalDoc.type === "incapacidad" ? null : null,
+        signatureUrl: null, autoSigned: false,
+        version: (originalDoc.version || 1) + 1, parentDocumentId: originalDoc.id, status: "vigente"
+      };
+      if (originalDoc.type === "incapacidad") newVersion.qrCode = "NEXUS-DOC-" + newVersion.id;
+      DocumentService.create(newVersion);
+      DocumentService.markReplaced(originalDoc.id);
+      return newVersion;
+    },
+    markReplaced: function (id) {
+      const result = StorageService.update("documents", function (list) {
+        return (list || []).map(function (d) { return d.id === id ? Object.assign({}, d, { status: "reemplazado" }) : d; });
+      }, []);
+      DocumentSync.pushStatus(id, "reemplazado");
       return result;
     }
   };
@@ -3918,7 +3966,7 @@ textarea:focus-visible,
     sortKey = sortKey || "fecha";
     sortDir = sortDir || "desc";
     const docs = DocumentService.list()
-      .filter(function (d) { return !presetPatientId || d.patientId === presetPatientId; })
+      .filter(function (d) { return d.status !== "reemplazado" && (!presetPatientId || d.patientId === presetPatientId); })
       .sort(function (a, b) {
         const av = sortKey === "tipo" ? docTypeLabel(a.type) : (sortKey === "paciente" ? a.patientName : a.fecha);
         const bv = sortKey === "tipo" ? docTypeLabel(b.type) : (sortKey === "paciente" ? b.patientName : b.fecha);
@@ -3937,7 +3985,7 @@ textarea:focus-visible,
       : docs.map(function (d) {
           return (
             '<tr style="cursor:pointer;" data-open="' + d.id + '">' +
-              '<td><span class="badge ' + (d.origen === "paciente" ? "badge-warning" : "badge-accent") + '">' + docTypeLabel(d.type) + '</span></td>' +
+              '<td><span class="badge ' + (d.origen === "paciente" ? "badge-warning" : "badge-accent") + '">' + docTypeLabel(d.type) + '</span>' + ((d.version || 1) > 1 ? ' <span class="badge badge-neutral">v' + d.version + '</span>' : '') + '</td>' +
               '<td>' + d.patientName + (d.origen === "paciente" ? ' <span class="badge badge-neutral" style="margin-left:4px;">Aportado por el paciente</span>' : '') + '</td>' +
               '<td class="mono">' + d.fecha + '</td>' +
               '<td>' + d.autor + '</td>' +
@@ -4078,8 +4126,9 @@ textarea:focus-visible,
     const d = DocumentService.list().filter(function (x) { return x.id === id; })[0];
     if (!d) return;
     const isIncapacidad = d.type === "incapacidad";
+    const history = DocumentService.versionHistory(id);
     Modal.open({
-      title: docTypeLabel(d.type),
+      title: docTypeLabel(d.type) + ((d.version || 1) > 1 ? " · v" + d.version : ""),
       body:
         '<div id="doc-print-area" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:18px;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
@@ -4104,12 +4153,41 @@ textarea:focus-visible,
           '<div style="margin-top:16px;padding-top:12px;border-top:1px dashed var(--color-border);font-size:11px;color:var(--color-danger);text-align:center;">' +
             'REQUIERE FIRMA DEL PROFESIONAL PARA VALIDEZ OFICIAL' +
           '</div>' +
+        '</div>' +
+        (history.length > 1
+          ? '<div style="margin-top:14px;">' +
+              '<div style="font-size:11.5px;font-weight:700;color:var(--color-text-muted);margin-bottom:6px;">Historial de versiones</div>' +
+              history.map(function (h) {
+                return '<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;' + (h.id === d.id ? 'color:var(--color-primary-dark);font-weight:600;' : 'color:var(--color-text-muted);') + '">' +
+                  '<span>v' + h.version + (h.status === "reemplazado" ? " (reemplazada)" : " (vigente)") + '</span><span class="mono">' + h.fecha + '</span></div>';
+              }).join("") +
+            '</div>'
+          : '') +
+        '<div class="form-field" id="doc-new-version-form" style="display:none;margin-top:14px;">' +
+          '<label>Contenido de la nueva versión</label>' +
+          '<textarea id="doc-new-version-content" rows="4" style="width:100%;border:1.5px solid var(--color-border);border-radius:var(--radius-sm);padding:10px;font-family:inherit;">' + d.contenido + '</textarea>' +
         '</div>',
       foot:
         '<button class="btn btn-secondary" id="doc-close">Cerrar</button>' +
+        (d.status !== "reemplazado" ? '<button class="btn btn-secondary" id="doc-new-version-btn">Nueva versión</button>' : '') +
         '<button class="btn btn-primary" id="doc-print">Imprimir / Descargar</button>'
     });
     document.getElementById("doc-close").addEventListener("click", Modal.close);
+    const newVersionBtn = document.getElementById("doc-new-version-btn");
+    if (newVersionBtn) newVersionBtn.addEventListener("click", function () {
+      const form = document.getElementById("doc-new-version-form");
+      if (form.style.display === "none") {
+        form.style.display = "block";
+        newVersionBtn.textContent = "Guardar nueva versión";
+      } else {
+        const newContenido = document.getElementById("doc-new-version-content").value.trim();
+        if (!newContenido) { Toast.show("Escribe el contenido de la nueva versión.", "danger"); return; }
+        DocumentService.createNewVersion(d, newContenido, AppState.currentUser ? AppState.currentUser.label : "Sistema");
+        Modal.close();
+        Toast.show("Nueva versión creada.", "success");
+        renderDocumentos(AppState.docFilterPatient || null);
+      }
+    });
     document.getElementById("doc-print").addEventListener("click", function () {
       const content = document.getElementById("doc-print-area").outerHTML;
       const win = window.open("", "_blank");
