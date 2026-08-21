@@ -27,9 +27,9 @@
    1. VARIABLES
    ============================================================ */
 :root {
-  --color-primary: #0F766E;
-  --color-primary-dark: #115E59;
-  --color-primary-soft: #CCFBF1;
+  --color-primary: #1D4E89;
+  --color-primary-dark: #143968;
+  --color-primary-soft: #DCE8F7;
 
   --color-accent: #2563EB;
   --color-accent-soft: #DBEAFE;
@@ -152,7 +152,7 @@ textarea:focus-visible,
   position: fixed;
   top: 0; left: 0; bottom: 0;
   width: var(--sidebar-w);
-  background: #0B2B27;
+  background: #0B2340;
   color: #E7F5F2;
   display: flex;
   flex-direction: column;
@@ -184,7 +184,7 @@ textarea:focus-visible,
 .sidebar__mark {
   width: 32px; height: 32px;
   border-radius: 9px;
-  background: linear-gradient(135deg, var(--color-primary) 0%, #14B8A6 100%);
+  background: linear-gradient(135deg, var(--color-primary) 0%, #3B82F6 100%);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-head);
   font-weight: 800;
@@ -202,7 +202,7 @@ textarea:focus-visible,
 .sidebar__tag {
   font-family: var(--font-mono);
   font-size: 10px;
-  color: #7FC6BB;
+  color: #8FB4E3;
   text-transform: uppercase;
   letter-spacing: .06em;
 }
@@ -217,7 +217,7 @@ textarea:focus-visible,
   font-size: 10.5px;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: #5F958B;
+  color: #6E8FBE;
   padding: 10px 10px 6px;
 }
 .nav-item {
@@ -227,7 +227,7 @@ textarea:focus-visible,
   width: 100%;
   border: none;
   background: transparent;
-  color: #C9E6E0;
+  color: #D7E4F5;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   font-size: 13.6px;
@@ -254,10 +254,10 @@ textarea:focus-visible,
   border-top: 1px solid rgba(231,245,242,.1);
   font-family: var(--font-mono);
   font-size: 10.5px;
-  color: #5F958B;
+  color: #6E8FBE;
   line-height: 1.6;
 }
-.sidebar__footer strong { color: #9FD4C9; display: block; font-size: 10.5px; }
+.sidebar__footer strong { color: #A9C6EC; display: block; font-size: 10.5px; }
 
 /* ============================================================
    5. TOPBAR
@@ -660,7 +660,7 @@ textarea:focus-visible,
 .gate-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
 .gate-brand__mark {
   width: 44px; height: 44px; border-radius: 12px;
-  background: linear-gradient(135deg, var(--color-primary) 0%, #14B8A6 100%);
+  background: linear-gradient(135deg, var(--color-primary) 0%, #3B82F6 100%);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-head); font-weight: 800; color: #fff; font-size: 18px;
 }
@@ -795,6 +795,10 @@ textarea:focus-visible,
         <button class="btn btn-primary" id="btn-enter-app" disabled>Entrar al CRM</button>
       </div>
     </div>
+
+    <div style="text-align:center;margin-top:22px;padding-top:18px;border-top:1px solid var(--color-border);">
+      <button class="btn btn-ghost btn-sm" id="btn-trial-mode">Explorar en modo de prueba</button>
+    </div>
   </div>
 </div>
 
@@ -834,6 +838,7 @@ textarea:focus-visible,
     </div>
 
     <div class="topbar__right">
+      <span id="trial-mode-badge" class="badge badge-warning" style="display:none;">Modo de prueba</span>
       <a href="contigo.html" target="_blank" rel="noopener" class="btn btn-secondary btn-sm topbar-portal-link" style="text-decoration:none;">
         <span class="portal-link__label">Ver Nexus Contigo</span> ↗
       </a>
@@ -880,9 +885,30 @@ textarea:focus-visible,
     SUPABASE_ANON_KEY.indexOf("TU-ANON-KEY") === -1 &&
     typeof window.supabase !== "undefined";
 
-  const supabaseClient = supabaseConfigured
+  const realSupabaseClient = supabaseConfigured
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
+
+  /* Sustituto inofensivo: cuando está activo, cualquier llamada a
+     Supabase que el resto de la app haga (crear paciente, cita,
+     documento, etc.) se resuelve sin tocar la red ni la base de
+     datos real. Se usa exclusivamente durante una sesión aislada,
+     nunca durante el uso normal. */
+  function createNoopSupabaseClient() {
+    const resolved = Promise.resolve({ data: [], error: null });
+    const handler = {
+      get: function (target, prop) {
+        if (prop === "then") return resolved.then.bind(resolved);
+        if (prop === "catch") return resolved.catch.bind(resolved);
+        if (prop === "finally") return resolved.finally.bind(resolved);
+        return function () { return stub; };
+      }
+    };
+    const stub = new Proxy(function () {}, handler);
+    return stub;
+  }
+
+  let supabaseClient = realSupabaseClient;
 
   /* Los proyectos de Supabase usan distintos formatos de enlace
      según su configuración (token clásico en el hash, o código PKCE
@@ -927,9 +953,12 @@ textarea:focus-visible,
      localStorage directamente fuera de este objeto.
      ============================================================ */
   const StorageService = (function () {
-    const PREFIX = "cssnexus_";
+    let PREFIX = "cssnexus_";
 
     function key(k) { return PREFIX + k; }
+
+    function setNamespace(ns) { PREFIX = ns; }
+    function getNamespace() { return PREFIX; }
 
     function get(k, fallback) {
       try {
@@ -973,7 +1002,7 @@ textarea:focus-visible,
         .forEach(function (k) { window.localStorage.removeItem(k); });
     }
 
-    return { get: get, set: set, update: update, delete: del, seed: seed, clear: clearAll };
+    return { get: get, set: set, update: update, delete: del, seed: seed, clear: clearAll, setNamespace: setNamespace, getNamespace: getNamespace };
   })();
 
   /* ============================================================
@@ -990,7 +1019,8 @@ textarea:focus-visible,
     documents: [],
     followUps: [],
     timeline: [],
-    docFilterPatient: null
+    docFilterPatient: null,
+    trialMode: false
   };
 
   /* ============================================================
@@ -2347,12 +2377,54 @@ textarea:focus-visible,
   }
 
   document.getElementById("btn-switch-role").addEventListener("click", function () {
+    if (AppState.trialMode) { exitTrialMode(); return; }
     StorageService.delete("session_role");
     AppState.currentUser = null;
     if (supabaseConfigured) supabaseClient.auth.signOut();
     document.getElementById("app-shell").classList.remove("active");
     document.getElementById("role-gate").style.display = "flex";
   });
+
+  /* ------------------------------------------------------------
+     Modo de prueba — sesión completamente aislada. Ni una sola
+     escritura llega a Supabase mientras está activo (supabaseClient
+     queda sustituido por una versión inofensiva), y los datos viven
+     en su propio espacio de almacenamiento local, separado del real,
+     así que nunca se mezclan ni se pisan entre sí.
+     ------------------------------------------------------------ */
+  function enterTrialMode() {
+    AppState.trialMode = true;
+    StorageService.setNamespace("cssnexustrial_");
+    supabaseClient = createNoopSupabaseClient();
+
+    seedPatientData();
+    seedAppointmentData();
+    seedMedicationData();
+
+    AppState.currentUser = { role: "administrador", label: "Administrador", initials: "AD" };
+    document.getElementById("role-gate").style.display = "none";
+    document.getElementById("app-shell").classList.add("active");
+    document.getElementById("user-avatar").textContent = "AD";
+    document.getElementById("user-role-label").textContent = "Administrador";
+    document.getElementById("trial-mode-badge").style.display = "inline-flex";
+    document.getElementById("btn-switch-role").textContent = "Salir";
+
+    renderSidebarNav();
+    navigateTo("dashboard");
+  }
+
+  function exitTrialMode() {
+    const keysToRemove = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.indexOf("cssnexustrial_") === 0) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(function (k) { window.localStorage.removeItem(k); });
+    window.location.reload();
+  }
+
+  const trialBtn = document.getElementById("btn-trial-mode");
+  if (trialBtn) trialBtn.addEventListener("click", enterTrialMode);
 
   /* ============================================================
      ROUTER
@@ -2471,8 +2543,12 @@ textarea:focus-visible,
 
   function renderDashboard() {
     const root = document.getElementById("view-root");
+    const isAdmin = AppState.currentUser && AppState.currentUser.role === "administrador";
     root.innerHTML =
       viewHeader("dashboard") +
+      (isAdmin && supabaseConfigured ? '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;">' +
+        '<button class="btn btn-ghost btn-sm" id="btn-load-sample-data-dash">Cargar datos de muestra</button>' +
+      '</div>' : '') +
       '<div class="metric-grid">' +
         UI.metricCard("Pacientes pendientes", null, Icons.patients) +
         UI.metricCard("Próximas citas", AppointmentService.upcomingCount() || null, Icons.agenda) +
@@ -2489,6 +2565,8 @@ textarea:focus-visible,
         '',
         UI.emptyState("Sin actividad registrada", "Cada acción realizada en el CRM, como registrar un paciente o crear una cita, aparecerá en este panel en orden cronológico.")
       );
+    const dashSampleBtn = document.getElementById("btn-load-sample-data-dash");
+    if (dashSampleBtn) dashSampleBtn.addEventListener("click", function () { loadShowcaseDataset(dashSampleBtn); });
   }
 
   /* ============================================================
@@ -4288,6 +4366,96 @@ textarea:focus-visible,
     );
   }
 
+  async function loadShowcaseDataset(triggerBtn) {
+    const status = document.getElementById("sample-data-status");
+    const originalLabel = triggerBtn ? triggerBtn.textContent : null;
+    if (status) status.textContent = "Cargando…";
+    if (triggerBtn) { triggerBtn.disabled = true; triggerBtn.textContent = "Cargando…"; }
+    const doctors = AppointmentService.doctors();
+    const today = new Date();
+    const dateOffset = function (days) { const d = new Date(today); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+
+    const samplePatients = [
+      { nombre: "Elena Vásquez", identificacion: "8-711-2045", edad: 41, telefono: "6001-2233", correo: "elena.vasquez@correo.com", estado: "Activo", alergias: ["Ninguna declarada"], medicamentos: ["Losartán 50 mg"], antecedentes: ["Hipertensión"], condiciones: ["Control periódico"] },
+      { nombre: "Ricardo Batista", identificacion: "4-233-1187", edad: 63, telefono: "6112-4459", correo: "ricardo.batista@correo.com", estado: "En seguimiento", alergias: ["Sulfas"], medicamentos: ["Metformina 850 mg"], antecedentes: ["Diabetes tipo 2"], condiciones: ["Control metabólico"] },
+      { nombre: "Sofía Delgado", identificacion: "9-145-0872", edad: 29, telefono: "6234-8801", correo: "sofia.delgado@correo.com", estado: "Activo", alergias: ["Ninguna declarada"], medicamentos: ["Ninguno registrado"], antecedentes: ["Ninguno registrado"], condiciones: ["Ninguna registrada"] },
+      { nombre: "Manuel Ortega", identificacion: "PE-8-4471", edad: 55, telefono: "6345-1290", correo: "manuel.ortega@correo.com", estado: "Activo", alergias: ["Penicilina"], medicamentos: ["Salbutamol inhalador"], antecedentes: ["Asma"], condiciones: ["Seguimiento respiratorio"] },
+      { nombre: "Carmen Ríos", identificacion: "2-556-3390", edad: 34, telefono: "6456-7712", correo: "carmen.rios@correo.com", estado: "Activo", alergias: ["Ninguna declarada"], medicamentos: ["Amoxicilina 500 mg"], antecedentes: ["Ninguno registrado"], condiciones: ["Ninguna registrada"] }
+    ];
+
+    const createdPatients = [];
+    for (const sp of samplePatients) {
+      const id = PatientService.nextId();
+      const patient = Object.assign({ id: id, pipelineEstado: "Consulta" }, sp);
+      PatientService.create(patient);
+      createdPatients.push(patient);
+      await new Promise(function (r) { setTimeout(r, 60); });
+    }
+
+    if (doctors.length > 0 && createdPatients.length > 0) {
+      const modalidades = ["Presencial", "Virtual"];
+      const estadosCita = ["Programada", "Confirmada", "Completada"];
+      for (let i = 0; i < createdPatients.length; i++) {
+        const patient = createdPatients[i];
+        const doctor = doctors[i % doctors.length];
+        const appt = {
+          id: AppointmentService.nextId(), patientId: patient.id, patientName: patient.nombre,
+          doctorId: doctor.id, doctorName: doctor.nombre, especialidad: doctor.especialidad,
+          modalidad: modalidades[i % 2], fecha: dateOffset(i - 2), hora: "0" + (9 + i) + ":00",
+          estado: estadosCita[i % estadosCita.length]
+        };
+        AppointmentService.create(appt);
+
+        if (appt.estado === "Completada") {
+          const consulta = ConsultaService.createFromAppointment(appt);
+          ConsultaService.addNote(consulta.id, "Paciente refiere mejoría con el tratamiento indicado. Se continúa seguimiento.");
+          ConsultaService.complete(consulta.id);
+
+          const doc = {
+            id: DocumentService.nextId(), patientId: patient.id, patientName: patient.nombre,
+            type: "resumen_consulta", contenido: "Resumen de consulta: evolución favorable, se mantiene plan actual.",
+            fecha: new Date().toISOString().slice(0, 10), autor: doctor.nombre, filePath: null,
+            qrCode: null, signatureUrl: null, autoSigned: false
+          };
+          DocumentService.create(doc);
+        }
+        await new Promise(function (r) { setTimeout(r, 60); });
+      }
+    }
+
+    if (createdPatients[1]) {
+      FollowUpService.create({
+        id: FollowUpService.nextId(), patientId: createdPatients[1].id,
+        motivo: "Control de valores de glucosa", responsable: doctors[0] ? doctors[0].nombre : "Equipo médico",
+        proximaAccion: "Revisar hemoglobina glicosilada", notas: "Paciente con adherencia adecuada al tratamiento.",
+        estado: "En seguimiento", fecha: new Date().toISOString().slice(0, 10)
+      });
+    }
+    if (createdPatients[3]) {
+      ReferralService.create({
+        id: ReferralService.nextId(), patientId: createdPatients[3].id,
+        especialidad: "Neumología", motivo: "Evaluación especializada por cuadro respiratorio recurrente.",
+        estado: "Pendiente", fecha: new Date().toISOString().slice(0, 10)
+      });
+    }
+    if (createdPatients[2]) {
+      WaitlistService.create({
+        id: WaitlistService.nextId(), patientId: createdPatients[2].id,
+        especialidad: "Medicina general", modalidadPreferida: "Presencial",
+        notas: "Disponible solo por las tardes.", estado: "Pendiente", fecha: new Date().toISOString().slice(0, 10)
+      });
+    }
+    if (createdPatients[0]) {
+      QueueService.checkIn(createdPatients[0].id, CONSULTATION_FACILITIES[0]);
+    }
+
+    if (status) status.textContent = "Conjunto de datos cargado.";
+    if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = originalLabel; }
+    Toast.show("Datos de muestra cargados correctamente.", "success");
+    if (AppState.currentView === "configuracion") renderConfiguracion();
+    else renderDashboard();
+  }
+
   function wireOperatingHoursCard() {
     const facilitySelect = document.getElementById("oh-facility");
     const grid = document.getElementById("oh-grid");
@@ -4499,6 +4667,12 @@ textarea:focus-visible,
       '</div>' : '') +
 
       (isAdmin && supabaseConfigured ? renderStaffManagementCard() : '') +
+      (isAdmin && supabaseConfigured ? '<div class="card" style="margin-bottom:20px;">' +
+        '<div class="card-title">Datos de muestra</div>' +
+        '<div class="card-sub" style="margin-bottom:16px;">Puebla el sistema con un conjunto completo de pacientes, citas, consultas, documentos y seguimientos de ejemplo, útil para pruebas y demostraciones.</div>' +
+        '<button class="btn btn-secondary btn-sm" id="btn-load-sample-data">Cargar conjunto de datos</button>' +
+        '<div id="sample-data-status" style="font-size:12px;color:var(--color-text-muted);margin-top:10px;"></div>' +
+      '</div>' : '') +
       (isAdmin && supabaseConfigured ? '<div class="card" id="operating-hours-card" style="margin-bottom:20px;">' +
         '<div class="card-title">Horario de operación</div>' +
         '<div class="card-sub" style="margin-bottom:16px;">Define cuándo opera cada instalación. La cita automática desde Preconsulta y la reprogramación del paciente respetan esto.</div>' +
@@ -4520,6 +4694,8 @@ textarea:focus-visible,
 
     if (isAdmin && supabaseConfigured) wireStaffManagementCard();
     if (isAdmin && supabaseConfigured) wireOperatingHoursCard();
+    const sampleBtn = document.getElementById("btn-load-sample-data");
+    if (sampleBtn) sampleBtn.addEventListener("click", function () { loadShowcaseDataset(sampleBtn); });
 
     const sigSaveBtn = document.getElementById("signature-save");
     if (sigSaveBtn) sigSaveBtn.addEventListener("click", async function () {
